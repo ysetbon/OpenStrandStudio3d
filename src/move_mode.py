@@ -230,13 +230,14 @@ class MoveModeMixin:
             self.move_start_pos = np.array(pos_3d)
             print(f"Moving {self.hovered_control_point.upper()} of {strand.name}")
 
-    def _update_move(self, screen_x, screen_y, shift_held=False):
+    def _update_move(self, screen_x, screen_y, shift_held=False, ctrl_held=False):
         """
         Update position during move.
 
         Movement modes:
         - Normal drag: Move on XZ plane (horizontal ground plane)
         - Shift + drag: Move on vertical plane facing camera (Y axis movement)
+        - Ctrl + drag: Move towards/away from camera (depth movement)
         """
         if not self.moving_strand or self.move_start_pos is None:
             return
@@ -255,7 +256,12 @@ class MoveModeMixin:
         else:
             current_point = ((strand.start + strand.end) / 2).copy()
 
-        if shift_held:
+        if ctrl_held:
+            # CTRL held: Move towards/away from camera (depth movement)
+            delta = self._calculate_depth_movement(screen_x, screen_y, current_point)
+            if delta is None:
+                return
+        elif shift_held:
             # SHIFT held: Move on vertical plane facing camera
             # This makes the box follow the mouse exactly in screen space for Y movement
             new_pos = self._screen_to_vertical_plane(screen_x, screen_y, current_point)
@@ -448,6 +454,71 @@ class MoveModeMixin:
 
         return result
 
+    def _calculate_depth_movement(self, screen_x, screen_y, current_point):
+        """
+        Calculate movement towards/away from camera based on mouse drag.
+        Uses vertical mouse movement to control depth along camera view axis.
+        Dragging up moves away from camera, dragging down moves towards camera.
+
+        Distance limits:
+        - Minimum: 5.0 (invisible camera wall - object stops when hitting this)
+        - Maximum: 50.0 (reasonable far limit)
+        """
+        self.makeCurrent()
+
+        # Distance limits from camera (invisible walls)
+        CAMERA_WALL_THICKNESS = 5.0  # Invisible wall in front of camera
+        MAX_DEPTH = 50.0             # Maximum distance from camera
+
+        # Calculate camera position
+        azimuth_rad = math.radians(self.camera_azimuth)
+        elevation_rad = math.radians(self.camera_elevation)
+
+        camera_x = self.camera_target[0] + self.camera_distance * math.cos(elevation_rad) * math.sin(azimuth_rad)
+        camera_y = self.camera_target[1] + self.camera_distance * math.sin(elevation_rad)
+        camera_z = self.camera_target[2] + self.camera_distance * math.cos(elevation_rad) * math.cos(azimuth_rad)
+
+        camera_pos = np.array([camera_x, camera_y, camera_z])
+
+        # Calculate view direction from camera to the specific point being moved
+        # This ensures depth movement is always directly towards/away from camera
+        view_dir = current_point - camera_pos
+        view_dir_len = np.linalg.norm(view_dir)
+        if view_dir_len < 1e-6:
+            return None
+        view_dir = view_dir / view_dir_len
+
+        # Get screen delta from last position
+        if not hasattr(self, '_last_depth_screen_y'):
+            self._last_depth_screen_y = screen_y
+            return np.array([0.0, 0.0, 0.0])
+
+        screen_dy = screen_y - self._last_depth_screen_y
+        self._last_depth_screen_y = screen_y
+
+        # Scale factor based on camera distance for consistent feel
+        depth_speed = self.camera_distance * 0.005
+
+        # Positive screen_dy (dragging down) = move towards camera (negative depth)
+        # Negative screen_dy (dragging up) = move away from camera (positive depth)
+        depth_delta = -screen_dy * depth_speed
+
+        # Calculate current signed distance from camera along view direction
+        to_point = current_point - camera_pos
+        current_depth = np.dot(to_point, view_dir)
+
+        # Calculate new depth and clamp it (stop at invisible camera wall)
+        new_depth = current_depth + depth_delta
+        clamped_depth = max(CAMERA_WALL_THICKNESS, min(MAX_DEPTH, new_depth))
+
+        # Adjust delta based on clamping
+        actual_delta = clamped_depth - current_depth
+
+        # Calculate movement along view direction
+        delta = view_dir * actual_delta
+
+        return delta
+
     def _end_move(self):
         """End move operation"""
         if self.moving_strand:
@@ -455,3 +526,6 @@ class MoveModeMixin:
         self.moving_strand = None
         self.moving_control_point = None
         self.move_start_pos = None
+        # Reset depth tracking for next drag
+        if hasattr(self, '_last_depth_screen_y'):
+            delattr(self, '_last_depth_screen_y')

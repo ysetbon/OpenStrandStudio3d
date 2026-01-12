@@ -39,6 +39,7 @@ Thumbs.db
 # Project specific
 *.log
 *.tmp
+openstrand_1_106/
 
 # Claude
 .claude/

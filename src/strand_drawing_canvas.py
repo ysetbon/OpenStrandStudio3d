@@ -448,8 +448,9 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
                     # Update preview while creating strand
                     pass  # Just trigger update below
                 elif self.current_mode == "move" and self.moving_strand:
-                    # Update move - check if Shift is held for vertical movement (from MoveModeMixin)
-                    self._update_move(event.x(), event.y(), shift_held=shift_held)
+                    # Update move - check modifiers for movement direction (from MoveModeMixin)
+                    # Shift = vertical (Y), Ctrl = depth (towards/away from camera)
+                    self._update_move(event.x(), event.y(), shift_held=shift_held, ctrl_held=ctrl_held)
                 elif self.current_mode == "attach" and self.attaching:
                     # Update attached strand end position (from AttachModeMixin)
                     self._update_attach(event.x(), event.y(), shift_held=shift_held)
