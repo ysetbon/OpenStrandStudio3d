@@ -67,8 +67,9 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         self.hovered_attach_point = None  # (strand, side) tuple for hover feedback
         self.attach_sphere_radius = 0.3  # Radius of attachment point spheres
 
-        # Grid settings
+        # Grid and axes settings
         self.show_grid = True
+        self.show_axes = True
         self.grid_size = 10
         self.grid_spacing = 1.0
 
@@ -100,18 +101,39 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         # Enable lighting
         glEnable(GL_LIGHTING)
         glEnable(GL_LIGHT0)
+        glEnable(GL_LIGHT1)
+        glEnable(GL_LIGHT2)
         glEnable(GL_COLOR_MATERIAL)
         glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
 
-        # Light position and properties
-        glLightfv(GL_LIGHT0, GL_POSITION, [5.0, 5.0, 10.0, 1.0])
-        glLightfv(GL_LIGHT0, GL_AMBIENT, [0.3, 0.3, 0.3, 1.0])
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, [0.8, 0.8, 0.8, 1.0])
-        glLightfv(GL_LIGHT0, GL_SPECULAR, [1.0, 1.0, 1.0, 1.0])
+        # Normalize normals (important for scaled geometry)
+        glEnable(GL_NORMALIZE)
 
-        # Material properties
-        glMaterialfv(GL_FRONT, GL_SPECULAR, [0.5, 0.5, 0.5, 1.0])
-        glMaterialf(GL_FRONT, GL_SHININESS, 50.0)
+        # === KEY LIGHT (from above-front) ===
+        # Main light casting shadows - positioned high and slightly in front
+        # w=0.0 makes it directional (like sun), cheaper than point light
+        glLightfv(GL_LIGHT0, GL_POSITION, [0.3, 1.0, 0.5, 0.0])
+        glLightfv(GL_LIGHT0, GL_AMBIENT, [0.15, 0.15, 0.15, 1.0])  # Low ambient for contrast
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, [0.85, 0.85, 0.80, 1.0])  # Warm white
+        glLightfv(GL_LIGHT0, GL_SPECULAR, [1.0, 1.0, 0.95, 1.0])
+
+        # === FILL LIGHT (from below-side) ===
+        # Softer light to fill in shadows - prevents pure black areas
+        glLightfv(GL_LIGHT1, GL_POSITION, [-0.5, -0.3, 0.4, 0.0])
+        glLightfv(GL_LIGHT1, GL_AMBIENT, [0.0, 0.0, 0.0, 1.0])
+        glLightfv(GL_LIGHT1, GL_DIFFUSE, [0.25, 0.25, 0.30, 1.0])  # Cool, dim
+        glLightfv(GL_LIGHT1, GL_SPECULAR, [0.0, 0.0, 0.0, 1.0])    # No specular
+
+        # === RIM LIGHT (from behind) ===
+        # Creates subtle edge highlighting for depth
+        glLightfv(GL_LIGHT2, GL_POSITION, [0.0, 0.5, -1.0, 0.0])
+        glLightfv(GL_LIGHT2, GL_AMBIENT, [0.0, 0.0, 0.0, 1.0])
+        glLightfv(GL_LIGHT2, GL_DIFFUSE, [0.2, 0.2, 0.25, 1.0])   # Subtle blue tint
+        glLightfv(GL_LIGHT2, GL_SPECULAR, [0.3, 0.3, 0.35, 1.0])
+
+        # Material properties - plastic leather sheen
+        glMaterialfv(GL_FRONT, GL_SPECULAR, [0.7, 0.7, 0.7, 1.0])  # Brighter specular for plastic look
+        glMaterialf(GL_FRONT, GL_SHININESS, 64.0)  # Higher = tighter, glossier highlights
 
     def resizeGL(self, width, height):
         """Handle widget resize"""
@@ -141,7 +163,8 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
             self._draw_grid()
 
         # Draw coordinate axes
-        self._draw_axes()
+        if self.show_axes:
+            self._draw_axes()
 
         # Draw all strands
         self._draw_strands()
@@ -525,7 +548,7 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         Other:
         - Delete: Delete selected strand
         - Escape: Cancel/deselect
-        - G: Toggle grid
+        - G: Toggle grid/axes (via toolbar shortcut)
         - Home: Reset camera
         """
         if event.key() == Qt.Key_Delete:
@@ -542,9 +565,7 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
                 self.selected_strand = None
                 self.strand_selected.emit("")
 
-        elif event.key() == Qt.Key_G:
-            # Toggle grid
-            self.show_grid = not self.show_grid
+        # Note: 'G' key for grid/axes toggle is handled by toolbar action shortcut
 
         # Camera view shortcuts
         elif event.key() == Qt.Key_1:
@@ -807,6 +828,21 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         self.camera_target = np.array([0.0, 0.0, 0.0])
         self.update()
 
+    def toggle_grid_axes(self):
+        """Toggle visibility of grid and axes"""
+        # Toggle both together
+        new_state = not (self.show_grid and self.show_axes)
+        self.show_grid = new_state
+        self.show_axes = new_state
+        self.update()
+        return new_state
+
+    def set_grid_axes_visible(self, visible: bool):
+        """Set visibility of grid and axes"""
+        self.show_grid = visible
+        self.show_axes = visible
+        self.update()
+
     def select_strand_by_name(self, name: str):
         """Select a strand by its name"""
         for strand in self.strands:
@@ -825,3 +861,174 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
                 strand.visible = visible
                 self.update()
                 return
+
+    def set_strand_color(self, name: str, color: tuple):
+        """Set color of a strand"""
+        for strand in self.strands:
+            if strand.name == name:
+                strand.color = color
+                self.update()
+                return
+
+    def update_color_for_set(self, set_number: int, color: tuple):
+        """
+        Update color for all strands in a specific set.
+
+        Args:
+            set_number: The set number (e.g., 1 for strands 1_1, 1_2, etc.)
+            color: RGB tuple (0-1 range)
+        """
+        set_prefix = f"{set_number}_"
+
+        for strand in self.strands:
+            if strand.name.startswith(set_prefix):
+                strand.color = color
+
+        self.update()
+
+    def deselect_all(self):
+        """Deselect all strands"""
+        self.selected_strand = None
+        self.hovered_strand = None
+        self.update()
+
+    # ==================== Save/Load Methods ====================
+
+    def get_project_data(self):
+        """
+        Get all project data as a dictionary for saving.
+
+        Returns:
+            dict: Project data including all strands
+        """
+        from attached_strand import AttachedStrand
+
+        # Separate strands into base strands and attached strands
+        # Base strands must be saved first (parents before children)
+        base_strands = []
+        attached_strands = []
+
+        for strand in self.strands:
+            if isinstance(strand, AttachedStrand):
+                attached_strands.append(strand)
+            else:
+                base_strands.append(strand)
+
+        # Sort attached strands by dependency order (parents before children)
+        attached_strands = self._sort_attached_strands(attached_strands)
+
+        # Build strands list
+        strands_data = []
+
+        # Add base strands first
+        for strand in base_strands:
+            data = strand.to_dict()
+            data['type'] = 'strand'
+            strands_data.append(data)
+
+        # Add attached strands in dependency order
+        for strand in attached_strands:
+            data = strand.to_dict()
+            # type is already set by AttachedStrand.to_dict()
+            strands_data.append(data)
+
+        return {
+            'version': '1.0',
+            'project_name': 'OpenStrandStudio Project',
+            'camera': {
+                'distance': self.camera_distance,
+                'azimuth': self.camera_azimuth,
+                'elevation': self.camera_elevation,
+                'target': self.camera_target.tolist()
+            },
+            'strands': strands_data
+        }
+
+    def _sort_attached_strands(self, attached_strands):
+        """
+        Sort attached strands so parents come before children.
+
+        This ensures proper reconstruction during load.
+        """
+        sorted_list = []
+        remaining = attached_strands.copy()
+
+        # Keep processing until all are sorted
+        max_iterations = len(remaining) * 2  # Safety limit
+        iterations = 0
+
+        while remaining and iterations < max_iterations:
+            iterations += 1
+            for strand in remaining[:]:
+                # Check if parent is already in sorted list or is a base strand
+                parent = strand.parent_strand
+                parent_is_sorted = (
+                    parent not in [s for s in attached_strands] or
+                    parent in sorted_list
+                )
+
+                if parent_is_sorted:
+                    sorted_list.append(strand)
+                    remaining.remove(strand)
+
+        # Add any remaining (shouldn't happen with valid data)
+        sorted_list.extend(remaining)
+
+        return sorted_list
+
+    def load_project_data(self, data):
+        """
+        Load project data from a dictionary.
+
+        Args:
+            data: dict with project data
+        """
+        from strand import Strand
+        from attached_strand import AttachedStrand
+
+        # Clear existing strands
+        self.strands.clear()
+        self.selected_strand = None
+        self.hovered_strand = None
+
+        # Load camera settings
+        if 'camera' in data:
+            cam = data['camera']
+            self.camera_distance = cam.get('distance', 10.0)
+            self.camera_azimuth = cam.get('azimuth', 45.0)
+            self.camera_elevation = cam.get('elevation', 30.0)
+            if 'target' in cam:
+                self.camera_target = np.array(cam['target'])
+
+        # Build lookup table as we load strands
+        strand_lookup = {}
+
+        # Load strands
+        for strand_data in data.get('strands', []):
+            strand_type = strand_data.get('type', 'strand')
+
+            if strand_type == 'strand':
+                # Load base strand
+                strand = Strand.from_dict(strand_data)
+                self.strands.append(strand)
+                strand_lookup[strand.name] = strand
+
+            elif strand_type == 'attached':
+                # Load attached strand
+                try:
+                    strand = AttachedStrand.from_dict(strand_data, strand_lookup)
+                    self.strands.append(strand)
+                    strand_lookup[strand.name] = strand
+                except ValueError as e:
+                    print(f"Warning: Could not load attached strand: {e}")
+
+        self.update()
+        print(f"Loaded {len(self.strands)} strands")
+
+    def clear_project(self):
+        """Clear all strands and reset the canvas"""
+        self.strands.clear()
+        self.selected_strand = None
+        self.hovered_strand = None
+        self.reset_camera()
+        self.update()

@@ -37,13 +37,14 @@ class Strand:
         # Visual properties
         self.color = color if color else (0.9, 0.5, 0.1)  # Orange default
         self.width = width
+        self.height_ratio = 0.4  # Height is 40% of width (2.5:1 flat ratio for plastic leather look)
         self.visible = True
 
         # Calculate initial control points (1/3 and 2/3 along the strand)
         self._init_control_points()
 
         # Rendering settings
-        self.tube_segments = 16  # Segments around tube circumference
+        self.tube_segments = 24  # Segments around circumference (more for smooth ellipse)
         self.curve_segments = 32  # Segments along curve length
 
         # Selection/highlight state
@@ -62,11 +63,9 @@ class Strand:
         direction = self.end - self.start
 
         # Place control points at 1/3 and 2/3 along the strand
-        # Offset them slightly upward (Y) for initial curve
-        offset = np.array([0, 0.3, 0])  # Slight Y offset for visual curve
-
-        self.control_point1 = self.start + direction * 0.33 + offset
-        self.control_point2 = self.start + direction * 0.67 + offset
+        # Keep them in the same XZ plane as start/end (no Y offset)
+        self.control_point1 = self.start + direction * 0.33
+        self.control_point2 = self.start + direction * 0.67
 
     def get_bezier_point(self, t):
         """
@@ -160,11 +159,212 @@ class Strand:
 
         glColor3f(*color)
 
-        # Draw as tube
-        self._draw_tube()
+        # Check if this strand is a root (not attached to anything)
+        # If so, draw the entire chain as one continuous spline
+        if self._is_chain_root():
+            self._draw_chain_as_spline()
+        else:
+            # This strand will be drawn as part of its parent's chain
+            pass
 
-        # Draw end caps
-        self._draw_end_caps()
+    def _is_chain_root(self):
+        """Check if this strand is the root of a chain (not attached to another strand)"""
+        # Base Strand class is always a root
+        # AttachedStrand will override this to return False
+        return True
+
+    def _get_chain_strands(self):
+        """
+        Get all strands in this chain, in order from root to leaves.
+        Returns a list of strand chains (each chain is a list of strands).
+        For now, we follow the first attached strand at each level (linear chain).
+        """
+        chains = []
+        self._collect_chains([], chains)
+        return chains
+
+    def _collect_chains(self, current_chain, all_chains):
+        """Recursively collect strand chains"""
+        current_chain = current_chain + [self]
+
+        # Find strands attached to our end (attachment_side == 1)
+        end_attachments = [s for s in self.attached_strands
+                          if hasattr(s, 'attachment_side') and s.attachment_side == 1]
+
+        if not end_attachments:
+            # End of chain - save it
+            all_chains.append(current_chain)
+        else:
+            # Continue chain with each attached strand
+            for attached in end_attachments:
+                attached._collect_chains(current_chain, all_chains)
+
+    def _draw_chain_as_spline(self):
+        """Draw the entire strand chain as one continuous Bezier spline"""
+        chains = self._get_chain_strands()
+
+        for chain in chains:
+            if not chain:
+                continue
+
+            # Collect all curve points from all strands in the chain
+            all_points = []
+            for i, strand in enumerate(chain):
+                points = strand.get_curve_points()
+                if i == 0:
+                    # First strand - include all points
+                    all_points.extend(points)
+                else:
+                    # Skip first point (it's the same as previous strand's last point)
+                    all_points.extend(points[1:])
+
+            if len(all_points) < 2:
+                continue
+
+            # Compute parallel transport frames for the entire chain
+            frames = self._compute_chain_frames(all_points)
+
+            # Draw as one continuous tube
+            self._draw_tube_from_points(all_points, frames)
+
+            # Draw end caps only at the true start and end of the chain
+            self._draw_chain_end_caps(chain)
+
+    def _compute_chain_frames(self, points):
+        """Compute parallel transport frames for a chain of points"""
+        frames = []
+        n = len(points)
+
+        if n < 2:
+            return frames
+
+        # Initial frame at first point
+        tangent = points[1] - points[0]
+        tangent_len = np.linalg.norm(tangent)
+        if tangent_len > 1e-6:
+            tangent /= tangent_len
+
+        # Find initial right and up vectors
+        if abs(tangent[1]) < 0.9:
+            up_hint = np.array([0.0, 1.0, 0.0])
+        else:
+            up_hint = np.array([0.0, 0.0, 1.0])
+
+        right = np.cross(tangent, up_hint)
+        right_len = np.linalg.norm(right)
+        if right_len > 1e-6:
+            right /= right_len
+
+        up = np.cross(right, tangent)
+        up_len = np.linalg.norm(up)
+        if up_len > 1e-6:
+            up /= up_len
+
+        frames.append((right.copy(), up.copy()))
+
+        # Propagate frame using parallel transport
+        for i in range(1, n):
+            if i < n - 1:
+                new_tangent = points[i + 1] - points[i]
+            else:
+                new_tangent = points[i] - points[i - 1]
+
+            new_tangent_len = np.linalg.norm(new_tangent)
+            if new_tangent_len > 1e-6:
+                new_tangent /= new_tangent_len
+
+            # Parallel transport the frame
+            dot = np.dot(tangent, new_tangent)
+
+            if dot < -0.99:
+                # Nearly opposite - flip
+                right = -right
+            elif dot < 0.99:
+                # Rotate frame
+                axis = np.cross(tangent, new_tangent)
+                axis_len = np.linalg.norm(axis)
+                if axis_len > 1e-6:
+                    axis /= axis_len
+                    angle = np.arccos(np.clip(dot, -1.0, 1.0))
+                    right = self._rotate_vector(right, axis, angle)
+
+            up = np.cross(right, new_tangent)
+            up_len = np.linalg.norm(up)
+            if up_len > 1e-6:
+                up /= up_len
+
+            right = np.cross(new_tangent, up)
+            right_len = np.linalg.norm(right)
+            if right_len > 1e-6:
+                right /= right_len
+
+            frames.append((right.copy(), up.copy()))
+            tangent = new_tangent
+
+        return frames
+
+    def _rotate_vector(self, v, axis, angle):
+        """Rotate vector v around axis by angle (Rodrigues' formula)"""
+        cos_a = np.cos(angle)
+        sin_a = np.sin(angle)
+        return v * cos_a + np.cross(axis, v) * sin_a + axis * np.dot(axis, v) * (1 - cos_a)
+
+    def _draw_tube_from_points(self, points, frames):
+        """Draw a tube along the given points using the provided frames"""
+        if len(points) < 2 or len(frames) < 2:
+            return
+
+        height = self.width * self.height_ratio
+
+        glBegin(GL_QUAD_STRIP)
+
+        for i in range(len(points) - 1):
+            right1, up1 = frames[i]
+            right2, up2 = frames[i + 1]
+            center1 = points[i]
+            center2 = points[i + 1]
+
+            for j in range(self.tube_segments + 1):
+                idx = j % self.tube_segments
+                angle = 2 * np.pi * idx / self.tube_segments
+
+                # Elliptical cross-section
+                cos_a = np.cos(angle)
+                sin_a = np.sin(angle)
+
+                # First ring vertex
+                offset1 = self.width * cos_a * right1 + height * sin_a * up1
+                v1 = center1 + offset1
+                n1 = cos_a * right1 + sin_a * up1
+                n1 /= np.linalg.norm(n1)
+                glNormal3f(*n1)
+                glVertex3f(*v1)
+
+                # Second ring vertex
+                offset2 = self.width * cos_a * right2 + height * sin_a * up2
+                v2 = center2 + offset2
+                n2 = cos_a * right2 + sin_a * up2
+                n2 /= np.linalg.norm(n2)
+                glNormal3f(*n2)
+                glVertex3f(*v2)
+
+        glEnd()
+
+    def _draw_chain_end_caps(self, chain):
+        """Draw end caps only at the true start and end of the chain"""
+        if not chain:
+            return
+
+        first_strand = chain[0]
+        last_strand = chain[-1]
+
+        # Start cap
+        tangent_start = first_strand.get_bezier_tangent(0.0)
+        self._draw_ellipsoid_cap(first_strand.start, tangent_start)
+
+        # End cap
+        tangent_end = last_strand.get_bezier_tangent(1.0)
+        self._draw_ellipsoid_cap(last_strand.end, tangent_end)
 
     def _draw_tube(self):
         """Draw the strand as a tube along the Bezier curve using parallel transport frame"""
@@ -288,16 +488,31 @@ class Strand:
 
         return frames
 
+    def _get_ellipse_from_frame(self, center, right, up):
+        """
+        Get vertices of an ellipse using pre-computed frame vectors.
+        Creates a flat, lenticular cross-section for plastic leather look.
+
+        - 'right' direction: full width
+        - 'up' direction: reduced height (height_ratio * width)
+        """
+        vertices = []
+        height = self.width * self.height_ratio
+
+        for i in range(self.tube_segments):
+            angle = 2 * np.pi * i / self.tube_segments
+            # Ellipse: width in 'right' direction, height in 'up' direction
+            offset = (self.width * np.cos(angle) * right +
+                     height * np.sin(angle) * up)
+            vertices.append(center + offset)
+        return vertices
+
     def _get_circle_from_frame(self, center, right, up):
         """
         Get vertices of a circle using pre-computed frame vectors.
+        Now redirects to ellipse for plastic leather look.
         """
-        vertices = []
-        for i in range(self.tube_segments):
-            angle = 2 * np.pi * i / self.tube_segments
-            offset = self.width * (np.cos(angle) * right + np.sin(angle) * up)
-            vertices.append(center + offset)
-        return vertices
+        return self._get_ellipse_from_frame(center, right, up)
 
     def _get_circle_vertices(self, center, tangent):
         """
@@ -331,20 +546,75 @@ class Strand:
         return vertices
 
     def _draw_end_caps(self):
-        """Draw spherical end caps on the tube"""
-        # Start cap
-        self._draw_sphere(self.start, self.width)
+        """Draw ellipsoid end caps on the tube"""
+        tangent_start = self.get_bezier_tangent(0.0)
+        tangent_end = self.get_bezier_tangent(1.0)
 
-        # End cap
-        self._draw_sphere(self.end, self.width)
+        # Draw both end caps
+        self._draw_ellipsoid_cap(self.start, tangent_start)
+        self._draw_ellipsoid_cap(self.end, tangent_end)
 
-    def _draw_sphere(self, position, radius):
-        """Draw a sphere at the given position"""
+    def _draw_ellipsoid_cap(self, position, tangent):
+        """Draw an ellipsoid cap at the given position, oriented along tangent"""
         glPushMatrix()
         glTranslatef(*position)
 
+        # Calculate orientation to align with tangent
+        # We need to rotate the ellipsoid so its long axis aligns with 'right' vector
+        if abs(tangent[1]) < 0.9:
+            up_hint = np.array([0.0, 1.0, 0.0])
+        else:
+            up_hint = np.array([0.0, 0.0, 1.0])
+
+        right = np.cross(tangent, up_hint)
+        right_len = np.linalg.norm(right)
+        if right_len > 1e-6:
+            right /= right_len
+
+        up = np.cross(right, tangent)
+        up_len = np.linalg.norm(up)
+        if up_len > 1e-6:
+            up /= up_len
+
+        # Build rotation matrix (column vectors: right, up, tangent)
+        rotation = np.array([
+            [right[0], up[0], tangent[0], 0],
+            [right[1], up[1], tangent[1], 0],
+            [right[2], up[2], tangent[2], 0],
+            [0, 0, 0, 1]
+        ], dtype=np.float32)
+
+        glMultMatrixf(rotation.T.flatten())
+
+        # Scale to create ellipsoid: wide in X (right), flat in Y (up), short in Z (tangent)
+        height = self.width * self.height_ratio
+        glScalef(self.width, height, self.width * 0.5)  # Hemisphere depth
+
+        # Enable normal renormalization for correct lighting after scaling
+        glEnable(GL_NORMALIZE)
+
         quadric = gluNewQuadric()
-        gluSphere(quadric, radius, 16, 16)
+        gluQuadricNormals(quadric, GLU_SMOOTH)  # Smooth normals for proper lighting
+        gluSphere(quadric, 1.0, 16, 16)
+        gluDeleteQuadric(quadric)
+
+        glPopMatrix()
+
+    def _draw_sphere(self, position, radius):
+        """Draw a sphere at the given position (legacy, now uses ellipsoid)"""
+        glPushMatrix()
+        glTranslatef(*position)
+
+        # Scale to ellipsoid shape
+        height = radius * self.height_ratio
+        glScalef(radius, height, radius)
+
+        # Enable normal renormalization for correct lighting after scaling
+        glEnable(GL_NORMALIZE)
+
+        quadric = gluNewQuadric()
+        gluQuadricNormals(quadric, GLU_SMOOTH)  # Smooth normals for proper lighting
+        gluSphere(quadric, 1.0, 16, 16)
         gluDeleteQuadric(quadric)
 
         glPopMatrix()
@@ -355,9 +625,21 @@ class Strand:
         """Set the first control point position"""
         self.control_point1 = np.array(position, dtype=float)
 
+        # Sync attached strands at start (attachment_side == 0) for C1 continuity
+        for attached in self.attached_strands:
+            if hasattr(attached, 'attachment_side') and attached.attachment_side == 0:
+                if hasattr(attached, 'sync_cp1_with_parent'):
+                    attached.sync_cp1_with_parent()
+
     def set_control_point2(self, position):
         """Set the second control point position"""
         self.control_point2 = np.array(position, dtype=float)
+
+        # Sync attached strands at end (attachment_side == 1) for C1 continuity
+        for attached in self.attached_strands:
+            if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
+                if hasattr(attached, 'sync_cp1_with_parent'):
+                    attached.sync_cp1_with_parent()
 
     def set_start(self, position):
         """Set the start position"""
@@ -367,6 +649,14 @@ class Strand:
         # Move control point 1 with start
         self.control_point1 += delta
 
+        # Update attached strands at start (attachment_side == 0)
+        for attached in self.attached_strands:
+            if hasattr(attached, 'attachment_side') and attached.attachment_side == 0:
+                if hasattr(attached, 'update_start_from_parent'):
+                    attached.update_start_from_parent()
+                if hasattr(attached, 'sync_cp1_with_parent'):
+                    attached.sync_cp1_with_parent()
+
     def set_end(self, position):
         """Set the end position"""
         delta = np.array(position, dtype=float) - self.end
@@ -374,6 +664,14 @@ class Strand:
 
         # Move control point 2 with end
         self.control_point2 += delta
+
+        # Update attached strands at end (attachment_side == 1)
+        for attached in self.attached_strands:
+            if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
+                if hasattr(attached, 'update_start_from_parent'):
+                    attached.update_start_from_parent()
+                if hasattr(attached, 'sync_cp1_with_parent'):
+                    attached.sync_cp1_with_parent()
 
     def move(self, delta):
         """Move the entire strand by delta"""
@@ -395,6 +693,7 @@ class Strand:
             'control_point2': self.control_point2.tolist(),
             'color': self.color,
             'width': self.width,
+            'height_ratio': self.height_ratio,
             'visible': self.visible
         }
 
@@ -406,11 +705,12 @@ class Strand:
             end=data['end'],
             name=data.get('name', ''),
             color=tuple(data.get('color', (0.9, 0.5, 0.1))),
-            width=data.get('width', 0.1)
+            width=data.get('width', 0.15)
         )
 
         strand.control_point1 = np.array(data['control_point1'])
         strand.control_point2 = np.array(data['control_point2'])
+        strand.height_ratio = data.get('height_ratio', 0.4)
         strand.visible = data.get('visible', True)
 
         return strand

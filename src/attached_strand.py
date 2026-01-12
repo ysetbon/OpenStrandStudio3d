@@ -61,6 +61,79 @@ class AttachedStrand(Strand):
         if self not in parent_strand.attached_strands:
             parent_strand.attached_strands.append(self)
 
+        # Align control point for C1 continuity with parent
+        self._align_cp1_with_parent()
+
+    def _align_cp1_with_parent(self):
+        """
+        Align control_point1 so that the tangent at our start matches
+        the parent's tangent at the connection point.
+        This creates C1 continuity (smooth connection).
+        """
+        # Get parent's tangent at the connection point
+        if self.attachment_side == 1:
+            # Attached to parent's end
+            # Parent's tangent at end = (parent.end - parent.control_point2)
+            # We want our tangent at start to be the same direction
+            parent_tangent_dir = self.parent_strand.end - self.parent_strand.control_point2
+        else:
+            # Attached to parent's start
+            # Parent's tangent at start = (parent.control_point1 - parent.start)
+            # We want our tangent at start to be opposite (continuing outward)
+            parent_tangent_dir = self.parent_strand.start - self.parent_strand.control_point1
+
+        # Normalize the direction
+        tangent_len = np.linalg.norm(parent_tangent_dir)
+        if tangent_len > 1e-6:
+            parent_tangent_dir = parent_tangent_dir / tangent_len
+
+        # Set our CP1 along this direction
+        # Use similar distance as parent's CP to connection point
+        if self.attachment_side == 1:
+            parent_cp_dist = np.linalg.norm(self.parent_strand.end - self.parent_strand.control_point2)
+        else:
+            parent_cp_dist = np.linalg.norm(self.parent_strand.start - self.parent_strand.control_point1)
+
+        # Use at least 1/3 of our length, or match parent's distance
+        our_length = np.linalg.norm(self.end - self.start)
+        cp_dist = max(parent_cp_dist, our_length * 0.33)
+
+        self.control_point1 = self.start + parent_tangent_dir * cp_dist
+
+    def sync_cp1_with_parent(self):
+        """
+        Synchronize our CP1 with parent's control point to maintain C1 continuity.
+        Call this when parent's CP2 (or CP1 for start attachment) changes.
+        """
+        self._align_cp1_with_parent()
+
+    def sync_parent_cp_with_our_cp1(self):
+        """
+        Synchronize parent's control point with our CP1 to maintain C1 continuity.
+        Call this when our CP1 changes.
+        """
+        # Our tangent at start = (control_point1 - start)
+        our_tangent_dir = self.control_point1 - self.start
+        tangent_len = np.linalg.norm(our_tangent_dir)
+        if tangent_len < 1e-6:
+            return
+
+        our_tangent_dir = our_tangent_dir / tangent_len
+
+        if self.attachment_side == 1:
+            # Attached to parent's end
+            # Parent's CP2 should be on opposite side of connection point
+            # Parent tangent at end = (end - CP2), should equal our tangent at start
+            # So: CP2 = end - tangent_dir * distance
+            parent_cp_dist = np.linalg.norm(self.parent_strand.end - self.parent_strand.control_point2)
+            self.parent_strand.control_point2 = self.parent_strand.end - our_tangent_dir * parent_cp_dist
+        else:
+            # Attached to parent's start
+            # Parent's CP1 should be on opposite side
+            # Parent tangent at start = (CP1 - start), should equal -our_tangent
+            parent_cp_dist = np.linalg.norm(self.parent_strand.start - self.parent_strand.control_point1)
+            self.parent_strand.control_point1 = self.parent_strand.start + our_tangent_dir * parent_cp_dist
+
     def _get_default_direction(self, parent_strand, attachment_side):
         """Get a default direction for the new strand based on parent's orientation"""
         # Get parent's direction
@@ -136,6 +209,10 @@ class AttachedStrand(Strand):
         """Check if start point can have strands attached (always False for AttachedStrand)"""
         return False  # Start is already attached to parent
 
+    def _is_chain_root(self):
+        """AttachedStrand is never a root - it's part of parent's chain"""
+        return False
+
     def is_end_attachable(self):
         """Check if end point can have strands attached"""
         return not self.end_attached
@@ -149,6 +226,48 @@ class AttachedStrand(Strand):
         data['start_attached'] = self.start_attached
         data['end_attached'] = self.end_attached
         return data
+
+    @classmethod
+    def from_dict(cls, data, strand_lookup):
+        """
+        Create an AttachedStrand from dictionary.
+
+        Args:
+            data: Dictionary with strand data
+            strand_lookup: Dict mapping strand names to Strand objects (for finding parent)
+
+        Returns:
+            AttachedStrand instance
+        """
+        parent_name = data['parent_name']
+        parent_strand = strand_lookup.get(parent_name)
+
+        if parent_strand is None:
+            raise ValueError(f"Parent strand '{parent_name}' not found")
+
+        # Create attached strand
+        attached = cls(
+            parent_strand=parent_strand,
+            attachment_side=data['attachment_side'],
+            end_position=data['end'],
+            name=data.get('name', '')
+        )
+
+        # Restore control points
+        attached.control_point1 = np.array(data['control_point1'])
+        attached.control_point2 = np.array(data['control_point2'])
+
+        # Restore visual properties
+        attached.color = tuple(data.get('color', (0.9, 0.5, 0.1)))
+        attached.width = data.get('width', 0.15)
+        attached.height_ratio = data.get('height_ratio', 0.4)
+        attached.visible = data.get('visible', True)
+
+        # Restore attachment state
+        attached.start_attached = data.get('start_attached', True)
+        attached.end_attached = data.get('end_attached', False)
+
+        return attached
 
     def __repr__(self):
         return f"AttachedStrand(name='{self.name}', parent='{self.parent_strand.name}', side={self.attachment_side})"

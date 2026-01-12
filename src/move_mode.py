@@ -293,9 +293,14 @@ class MoveModeMixin:
             # Propagate to connected strand at end
             self._move_connected_strands(strand, 'end', delta)
         elif self.moving_control_point == 'cp1':
-            strand.control_point1 = strand.control_point1 + delta
+            # Use setter to trigger C1 continuity sync with parent and children
+            strand.set_control_point1(strand.control_point1 + delta)
+            # If this is an AttachedStrand, also sync parent's control point
+            if hasattr(strand, 'sync_parent_cp_with_our_cp1'):
+                strand.sync_parent_cp_with_our_cp1()
         elif self.moving_control_point == 'cp2':
-            strand.control_point2 = strand.control_point2 + delta
+            # Use setter to trigger C1 continuity sync with attached strands
+            strand.set_control_point2(strand.control_point2 + delta)
         else:
             # Move whole strand
             strand.move(delta)
