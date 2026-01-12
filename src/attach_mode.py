@@ -183,6 +183,13 @@ class AttachModeMixin:
             name=strand_name
         )
 
+        # Override control points to make it a straight line initially
+        # (AttachedStrand.__init__ applies C1 alignment which curves it)
+        strand = self.attach_new_strand
+        direction = strand.end - strand.start
+        strand.control_point1 = strand.start + direction * 0.33
+        strand.control_point2 = strand.start + direction * 0.67
+
         self.attaching = True
         self.attach_parent_strand = parent_strand
         self.attach_side = side
@@ -204,12 +211,18 @@ class AttachModeMixin:
                 # Only change Y, keep X and Z
                 new_end = current_point.copy()
                 new_end[1] = new_pos[1]
-                strand.set_end(new_end)
+                strand.end = np.array(new_end)
         else:
             # Normal: move on XZ plane at current Y
             new_pos = self._screen_to_ground(screen_x, screen_y, ground_y=current_point[1])
             if new_pos:
-                strand.set_end(np.array(new_pos))
+                strand.end = np.array(new_pos)
+
+        # Keep control points linear (straight line) during drag
+        # CP1 at 1/3, CP2 at 2/3 along the strand
+        direction = strand.end - strand.start
+        strand.control_point1 = strand.start + direction * 0.33
+        strand.control_point2 = strand.start + direction * 0.67
 
     def _finish_attach(self, screen_x, screen_y):
         """Finalize the attachment"""
@@ -227,6 +240,11 @@ class AttachModeMixin:
             if strand in self.attach_parent_strand.attached_strands:
                 self.attach_parent_strand.attached_strands.remove(strand)
         else:
+            # Apply C1 continuity alignment for seamless connection
+            # This aligns CP1 with parent's tangent at the connection point
+            if hasattr(strand, '_align_cp1_with_parent'):
+                strand._align_cp1_with_parent()
+
             # Add to strands list
             self.strands.append(strand)
             self.selected_strand = strand

@@ -149,13 +149,8 @@ class Strand:
         self.is_selected = is_selected
         self.is_hovered = is_hovered
 
-        # Determine color based on state
-        if is_selected:
-            color = (1.0, 1.0, 0.0)  # Yellow for selected
-        elif is_hovered:
-            color = (0.7, 0.7, 1.0)  # Light blue for hovered
-        else:
-            color = self.color
+        # Use strand's actual color (selection highlight is drawn separately)
+        color = self.color
 
         glColor3f(*color)
 
@@ -166,6 +161,85 @@ class Strand:
         else:
             # This strand will be drawn as part of its parent's chain
             pass
+
+    def draw_selection_highlight(self):
+        """
+        Draw a semi-transparent highlight overlay for this strand only.
+        Used to show which strand is selected within a chain.
+        - 80% transparent (alpha = 0.2)
+        - 20% thicker than normal
+        """
+        if not self.visible:
+            return
+
+        # Get curve points for just this strand
+        curve_points = self.get_curve_points()
+        if len(curve_points) < 2:
+            return
+
+        # Compute frames for this strand's curve
+        frames = self._compute_parallel_frames(curve_points)
+        if len(frames) < 2:
+            return
+
+        # Store original width and set highlight width (50% thicker)
+        original_width = self.width
+        highlight_width = self.width * 1.5
+
+        # Enable blending for transparency
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+        # Disable depth writing so highlight shows on top
+        glDepthMask(GL_FALSE)
+
+        # Red highlight with 20% opacity (80% transparent)
+        glColor4f(1.0, 0.0, 0.0, 0.2)
+
+        # Draw the highlight tube
+        height = highlight_width * self.height_ratio
+
+        glBegin(GL_QUAD_STRIP)
+
+        for i in range(len(curve_points) - 1):
+            right1, up1 = frames[i]
+            right2, up2 = frames[i + 1]
+            center1 = curve_points[i]
+            center2 = curve_points[i + 1]
+
+            for j in range(self.tube_segments + 1):
+                idx = j % self.tube_segments
+                angle = 2 * np.pi * idx / self.tube_segments
+
+                # Elliptical cross-section with highlight width
+                cos_a = np.cos(angle)
+                sin_a = np.sin(angle)
+
+                # First ring vertex
+                offset1 = highlight_width * cos_a * right1 + height * sin_a * up1
+                v1 = center1 + offset1
+                n1 = cos_a * right1 + sin_a * up1
+                n1_len = np.linalg.norm(n1)
+                if n1_len > 1e-6:
+                    n1 = n1 / n1_len
+                glNormal3f(*n1)
+                glVertex3f(*v1)
+
+                # Second ring vertex
+                offset2 = highlight_width * cos_a * right2 + height * sin_a * up2
+                v2 = center2 + offset2
+                n2 = cos_a * right2 + sin_a * up2
+                n2_len = np.linalg.norm(n2)
+                if n2_len > 1e-6:
+                    n2 = n2 / n2_len
+                glNormal3f(*n2)
+                glVertex3f(*v2)
+
+        glEnd()
+
+        # Re-enable depth writing
+        glDepthMask(GL_TRUE)
+        glDisable(GL_BLEND)
 
     def _is_chain_root(self):
         """Check if this strand is the root of a chain (not attached to another strand)"""

@@ -256,6 +256,10 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
             is_hovered = (strand == self.hovered_strand)
             strand.draw(is_selected, is_hovered)
 
+        # Draw selection highlight for selected strand (semi-transparent overlay)
+        if self.selected_strand and self.selected_strand.visible:
+            self.selected_strand.draw_selection_highlight()
+
     def _draw_strand_preview(self):
         """Draw preview while creating a new strand"""
         if self.new_strand_start is None:
