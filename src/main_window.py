@@ -120,6 +120,14 @@ class MainWindow(QMainWindow):
         self.action_rigid.triggered.connect(self._toggle_rigid_points)
         toolbar.addAction(self.action_rigid)
 
+        # Straight segment mode toggle (forces strands to be straight lines)
+        self.action_straight = QAction("Straight", self)
+        self.action_straight.setCheckable(True)
+        self.action_straight.setChecked(False)
+        self.action_straight.setShortcut("S")
+        self.action_straight.triggered.connect(self._toggle_straight_mode)
+        toolbar.addAction(self.action_straight)
+
         toolbar.addSeparator()
 
         # Reset camera
@@ -203,6 +211,15 @@ class MainWindow(QMainWindow):
         """Toggle rigid points (start/end spheres) visibility"""
         visible = self.action_rigid.isChecked()
         self.canvas.set_rigid_points_visible(visible)
+
+    def _toggle_straight_mode(self):
+        """Toggle straight segment mode (forces strands to be straight lines)"""
+        enabled = self.action_straight.isChecked()
+        self.canvas.set_straight_segment_mode(enabled)
+        if enabled:
+            self.statusbar.showMessage("Straight segment mode: ON - strands are now straight lines", 3000)
+        else:
+            self.statusbar.showMessage("Straight segment mode: OFF - curves restored", 3000)
 
     def _on_mode_changed(self, mode: str):
         """Handle mode change from canvas"""

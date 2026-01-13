@@ -38,21 +38,22 @@ class MoveModeMixin:
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
-        # Draw lines from endpoints to control points first (behind boxes)
-        glColor4f(0.5, 0.5, 0.5, 0.8)
-        glLineWidth(2.0)
-        glBegin(GL_LINES)
+        # Draw lines from endpoints to control points (only if NOT in straight mode)
+        if not self.straight_segment_mode:
+            glColor4f(0.5, 0.5, 0.5, 0.8)
+            glLineWidth(2.0)
+            glBegin(GL_LINES)
 
-        # Start to control point 1
-        glVertex3f(*strand.start)
-        glVertex3f(*strand.control_point1)
+            # Start to control point 1
+            glVertex3f(*strand.start)
+            glVertex3f(*strand.control_point1)
 
-        # End to control point 2
-        glVertex3f(*strand.end)
-        glVertex3f(*strand.control_point2)
+            # End to control point 2
+            glVertex3f(*strand.end)
+            glVertex3f(*strand.control_point2)
 
-        glEnd()
-        glLineWidth(1.0)
+            glEnd()
+            glLineWidth(1.0)
 
         # Draw control point boxes
         # Start point - Green (or yellow if hovered)
@@ -67,17 +68,19 @@ class MoveModeMixin:
         else:
             self._draw_box(strand.end, box_size, (0.9, 0.0, 0.0, 0.8))  # Red
 
-        # Control point 1 - Cyan (or yellow if hovered)
-        if self.hovered_control_point == 'cp1':
-            self._draw_box(strand.control_point1, box_size * 0.8, (1.0, 1.0, 0.0, 0.6))
-        else:
-            self._draw_box(strand.control_point1, box_size * 0.8, (0.0, 0.9, 0.9, 0.8))  # Cyan
+        # Control point boxes only shown if NOT in straight mode
+        if not self.straight_segment_mode:
+            # Control point 1 - Cyan (or yellow if hovered)
+            if self.hovered_control_point == 'cp1':
+                self._draw_box(strand.control_point1, box_size * 0.8, (1.0, 1.0, 0.0, 0.6))
+            else:
+                self._draw_box(strand.control_point1, box_size * 0.8, (0.0, 0.9, 0.9, 0.8))  # Cyan
 
-        # Control point 2 - Magenta (or yellow if hovered)
-        if self.hovered_control_point == 'cp2':
-            self._draw_box(strand.control_point2, box_size * 0.8, (1.0, 1.0, 0.0, 0.6))
-        else:
-            self._draw_box(strand.control_point2, box_size * 0.8, (0.9, 0.0, 0.9, 0.8))  # Magenta
+            # Control point 2 - Magenta (or yellow if hovered)
+            if self.hovered_control_point == 'cp2':
+                self._draw_box(strand.control_point2, box_size * 0.8, (1.0, 1.0, 0.0, 0.6))
+            else:
+                self._draw_box(strand.control_point2, box_size * 0.8, (0.9, 0.0, 0.9, 0.8))  # Magenta
 
         glDisable(GL_BLEND)
         glEnable(GL_LIGHTING)
@@ -170,12 +173,19 @@ class MoveModeMixin:
         strand = self.selected_strand
 
         # Check each control point box using screen-space distance
-        control_points = {
-            'start': strand.start,
-            'end': strand.end,
-            'cp1': strand.control_point1,
-            'cp2': strand.control_point2
-        }
+        # In straight mode, only allow hovering over start/end (not cp1/cp2)
+        if self.straight_segment_mode:
+            control_points = {
+                'start': strand.start,
+                'end': strand.end
+            }
+        else:
+            control_points = {
+                'start': strand.start,
+                'end': strand.end,
+                'cp1': strand.control_point1,
+                'cp2': strand.control_point2
+            }
 
         # Screen pixel threshold for hover detection
         hover_threshold = 25  # pixels
@@ -288,10 +298,16 @@ class MoveModeMixin:
             strand.set_start(strand.start + delta)
             # Propagate to connected strand at start
             self._move_connected_strands(strand, 'start', delta)
+            # In straight mode, re-straighten the strand after movement
+            if self.straight_segment_mode:
+                strand.make_straight()
         elif self.moving_control_point == 'end':
             strand.set_end(strand.end + delta)
             # Propagate to connected strand at end
             self._move_connected_strands(strand, 'end', delta)
+            # In straight mode, re-straighten the strand after movement
+            if self.straight_segment_mode:
+                strand.make_straight()
         elif self.moving_control_point == 'cp1':
             # Use setter to trigger C1 continuity sync with parent and children
             strand.set_control_point1(strand.control_point1 + delta)
@@ -331,11 +347,17 @@ class MoveModeMixin:
                 if attachment_side == 0:
                     # Connected to parent's start
                     parent.set_start(parent.start + delta)
+                    # In straight mode, re-straighten parent
+                    if self.straight_segment_mode:
+                        parent.make_straight()
                     # Also propagate to anything else connected to parent's start
                     self._propagate_to_attached_strands(parent, 0, delta, exclude=strand)
                 else:
                     # Connected to parent's end
                     parent.set_end(parent.end + delta)
+                    # In straight mode, re-straighten parent
+                    if self.straight_segment_mode:
+                        parent.make_straight()
                     # Also propagate to anything else connected to parent's end
                     self._propagate_to_attached_strands(parent, 1, delta, exclude=strand)
             else:
@@ -372,6 +394,10 @@ class MoveModeMixin:
                 # Also move its end and cp2 to maintain shape (whole strand moves)
                 attached.end = attached.end + delta
                 attached.control_point2 = attached.control_point2 + delta
+
+                # In straight mode, re-straighten the attached strand
+                if self.straight_segment_mode:
+                    attached.make_straight()
 
     def _screen_to_vertical_plane(self, screen_x, screen_y, point_on_plane):
         """

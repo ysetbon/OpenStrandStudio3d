@@ -695,6 +695,76 @@ class Strand:
 
     # ==================== Control Point Methods ====================
 
+    def get_default_control_points(self):
+        """
+        Calculate what the default control points would be for current start/end.
+        Default is 1/3 and 2/3 along the direction from start to end.
+
+        Returns:
+            tuple: (cp1, cp2) numpy arrays
+        """
+        direction = self.end - self.start
+        cp1 = self.start + direction * 0.33
+        cp2 = self.start + direction * 0.67
+        return cp1, cp2
+
+    def is_control_points_default(self, tolerance=1e-4):
+        """
+        Check if control points are at their default positions (1/3 and 2/3 along strand).
+
+        Args:
+            tolerance: Maximum distance to consider as "default"
+
+        Returns:
+            bool: True if CPs are at default positions
+        """
+        expected_cp1, expected_cp2 = self.get_default_control_points()
+        return (np.allclose(self.control_point1, expected_cp1, atol=tolerance) and
+                np.allclose(self.control_point2, expected_cp2, atol=tolerance))
+
+    def make_straight(self):
+        """
+        Set control points to make the strand a straight line.
+        CPs are placed at 1/3 and 2/3 along the line from start to end.
+        """
+        direction = self.end - self.start
+        self.control_point1 = self.start + direction * 0.33
+        self.control_point2 = self.start + direction * 0.67
+
+    def save_control_points(self):
+        """
+        Save current control point state for later restoration.
+
+        Returns:
+            dict: Contains cp1, cp2 arrays and is_default flag
+        """
+        return {
+            'cp1': self.control_point1.copy(),
+            'cp2': self.control_point2.copy(),
+            'is_default': self.is_control_points_default()
+        }
+
+    def restore_control_points(self, saved):
+        """
+        Restore control points from saved state.
+        If saved state was default, recalculates default for current positions.
+
+        Args:
+            saved: dict from save_control_points() or None
+        """
+        if saved is None:
+            # No saved state - use default
+            self._init_control_points()
+            return
+
+        if saved.get('is_default', False):
+            # Was default - recalculate default for current start/end
+            self._init_control_points()
+        else:
+            # Was custom - restore exact positions
+            self.control_point1 = saved['cp1'].copy()
+            self.control_point2 = saved['cp2'].copy()
+
     def set_control_point1(self, position):
         """Set the first control point position"""
         self.control_point1 = np.array(position, dtype=float)

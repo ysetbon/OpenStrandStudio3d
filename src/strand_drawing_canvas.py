@@ -71,6 +71,10 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         self.show_rigid_points = False
         self.rigid_sphere_radius = 0.12  # Small spheres at strand endpoints
 
+        # Straight segment mode state - forces strands to be straight lines
+        self.straight_segment_mode = False
+        self.saved_control_points = {}  # Maps strand id -> saved CP data for restoration
+
         # Grid and axes settings
         self.show_grid = True
         self.show_axes = True
@@ -696,6 +700,11 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
             name=strand_name
         )
 
+        # If in straight mode, make sure new strand is straight
+        # (it should already be straight by default, but this ensures consistency)
+        if self.straight_segment_mode:
+            strand.make_straight()
+
         self.strands.append(strand)
         self.selected_strand = strand
 
@@ -765,6 +774,12 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         """Delete the currently selected strand"""
         if self.selected_strand:
             strand_name = self.selected_strand.name
+
+            # Clean up saved control points if in straight mode
+            strand_id = id(self.selected_strand)
+            if strand_id in self.saved_control_points:
+                del self.saved_control_points[strand_id]
+
             self.strands.remove(self.selected_strand)
             self.selected_strand = None
 
@@ -880,6 +895,50 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         """Set visibility of rigid points (start/end spheres on strands)"""
         self.show_rigid_points = visible
         self.update()
+
+    def set_straight_segment_mode(self, enabled: bool):
+        """
+        Toggle straight segment mode.
+
+        When enabled:
+        - All strands become straight lines (control points hidden)
+        - Moving strands keeps them straight
+        - Original control points are saved for restoration
+
+        When disabled:
+        - Strands return to their previous curve state
+        - Custom control points are restored
+        - Default control points are recalculated
+        """
+        if enabled == self.straight_segment_mode:
+            return  # No change
+
+        if enabled:
+            # Entering straight mode - save CPs and straighten all strands
+            self.saved_control_points.clear()
+            for strand in self.strands:
+                # Save current CP state
+                self.saved_control_points[id(strand)] = strand.save_control_points()
+                # Make strand straight
+                strand.make_straight()
+        else:
+            # Leaving straight mode - restore CPs
+            for strand in self.strands:
+                saved = self.saved_control_points.get(id(strand))
+                strand.restore_control_points(saved)
+            self.saved_control_points.clear()
+
+        self.straight_segment_mode = enabled
+        self.update()
+
+    def make_all_strands_straight(self):
+        """
+        Force all strands to be straight.
+        Called after operations that might affect strand geometry when in straight mode.
+        """
+        if self.straight_segment_mode:
+            for strand in self.strands:
+                strand.make_straight()
 
     def select_strand_by_name(self, name: str):
         """Select a strand by its name"""

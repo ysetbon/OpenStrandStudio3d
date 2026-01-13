@@ -240,10 +240,16 @@ class AttachModeMixin:
             if strand in self.attach_parent_strand.attached_strands:
                 self.attach_parent_strand.attached_strands.remove(strand)
         else:
-            # Apply C1 continuity alignment for seamless connection
-            # This aligns CP1 with parent's tangent at the connection point
-            if hasattr(strand, '_align_cp1_with_parent'):
-                strand._align_cp1_with_parent()
+            # In straight mode, keep strand straight (skip C1 alignment)
+            # Otherwise, apply C1 continuity alignment for seamless connection
+            if self.straight_segment_mode:
+                # Make sure strand is straight
+                strand.make_straight()
+            else:
+                # Apply C1 continuity alignment for seamless connection
+                # This aligns CP1 with parent's tangent at the connection point
+                if hasattr(strand, '_align_cp1_with_parent'):
+                    strand._align_cp1_with_parent()
 
             # Add to strands list
             self.strands.append(strand)
