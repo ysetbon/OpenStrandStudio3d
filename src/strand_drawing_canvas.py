@@ -67,6 +67,10 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         self.hovered_attach_point = None  # (strand, side) tuple for hover feedback
         self.attach_sphere_radius = 0.3  # Radius of attachment point spheres
 
+        # Rigid mode state - shows start/end point spheres
+        self.show_rigid_points = False
+        self.rigid_sphere_radius = 0.12  # Small spheres at strand endpoints
+
         # Grid and axes settings
         self.show_grid = True
         self.show_axes = True
@@ -181,6 +185,10 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         if self.current_mode == "attach":
             self._draw_attachment_points()
 
+        # Draw rigid points (start/end spheres) if enabled
+        if self.show_rigid_points:
+            self._draw_rigid_points()
+
     def _setup_camera(self):
         """Setup the camera view matrix"""
         # Convert spherical to Cartesian coordinates
@@ -293,6 +301,27 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         gluDeleteQuadric(quadric)
 
         glPopMatrix()
+
+    def _draw_rigid_points(self):
+        """Draw small spheres at start/end points of all strands when rigid mode is enabled"""
+        from attached_strand import AttachedStrand
+
+        for strand in self.strands:
+            if not strand.visible:
+                continue
+
+            # Use the strand's color for the spheres
+            color = strand.color
+
+            # For AttachedStrand, don't draw sphere at the attached start point
+            # (it's connected to parent, so only draw at the free end)
+            if isinstance(strand, AttachedStrand):
+                # Only draw at end point (start is attached to parent)
+                self._draw_sphere(strand.end, self.rigid_sphere_radius, color)
+            else:
+                # Regular strand - draw at both start and end
+                self._draw_sphere(strand.start, self.rigid_sphere_radius, color)
+                self._draw_sphere(strand.end, self.rigid_sphere_radius, color)
 
     def _get_mouse_3d_position(self, ground_y=0.0):
         """Convert current mouse position to 3D point on ground plane"""
@@ -845,6 +874,11 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         """Set visibility of grid and axes"""
         self.show_grid = visible
         self.show_axes = visible
+        self.update()
+
+    def set_rigid_points_visible(self, visible: bool):
+        """Set visibility of rigid points (start/end spheres on strands)"""
+        self.show_rigid_points = visible
         self.update()
 
     def select_strand_by_name(self, name: str):

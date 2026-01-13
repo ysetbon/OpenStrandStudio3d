@@ -112,6 +112,16 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
+        # Rigid toggle (shows start/end point spheres)
+        self.action_rigid = QAction("Rigid", self)
+        self.action_rigid.setCheckable(True)
+        self.action_rigid.setChecked(False)
+        self.action_rigid.setShortcut("R")
+        self.action_rigid.triggered.connect(self._toggle_rigid_points)
+        toolbar.addAction(self.action_rigid)
+
+        toolbar.addSeparator()
+
         # Reset camera
         self.action_reset_camera = QAction("Reset Camera", self)
         self.action_reset_camera.triggered.connect(self._reset_camera)
@@ -188,6 +198,11 @@ class MainWindow(QMainWindow):
         """Toggle grid and axes visibility"""
         visible = self.action_toggle_grid.isChecked()
         self.canvas.set_grid_axes_visible(visible)
+
+    def _toggle_rigid_points(self):
+        """Toggle rigid points (start/end spheres) visibility"""
+        visible = self.action_rigid.isChecked()
+        self.canvas.set_rigid_points_visible(visible)
 
     def _on_mode_changed(self, mode: str):
         """Handle mode change from canvas"""

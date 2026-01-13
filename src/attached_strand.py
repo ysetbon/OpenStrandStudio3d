@@ -210,8 +210,17 @@ class AttachedStrand(Strand):
         return False  # Start is already attached to parent
 
     def _is_chain_root(self):
-        """AttachedStrand is never a root - it's part of parent's chain"""
-        return False
+        """
+        Check if this attached strand is a chain root.
+
+        - Strands attached to parent's END (attachment_side=1) are part of parent's chain,
+          so they are NOT roots.
+        - Strands attached to parent's START (attachment_side=0) begin a NEW chain
+          going in the opposite direction, so they ARE roots.
+        """
+        # Attached to parent's start = starts a new chain = is a root
+        # Attached to parent's end = continues parent's chain = not a root
+        return self.attachment_side == 0
 
     def is_end_attachable(self):
         """Check if end point can have strands attached"""
