@@ -58,7 +58,7 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         self.move_start_pos = None  # 3D position where drag started
         self.hovered_control_point = None  # Which control point is hovered: 'start', 'end', 'cp1', 'cp2'
         self.control_point_box_size = 0.25  # Size of control point boxes
-        self.move_axis_mode = "normal"  # normal (XZ), vertical (Y), depth (camera)
+        self.move_axis_mode = "normal"  # normal (XZ), vertical (Y), depth (camera), along (other point)
 
         # Attach mode state
         self.attaching = False
@@ -67,7 +67,7 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         self.attach_new_strand = None
         self.hovered_attach_point = None  # (strand, side) tuple for hover feedback
         self.attach_sphere_radius = 0.3  # Radius of attachment point spheres
-        self.attach_axis_mode = "normal"  # normal (XZ), vertical (Y), depth (camera)
+        self.attach_axis_mode = "normal"  # normal (XZ), vertical (Y), depth (camera), along (other point)
 
         # Rigid mode state - shows start/end point spheres
         self.show_rigid_points = False
@@ -511,12 +511,10 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
                     pass  # Just trigger update below
                 elif self.current_mode == "move" and self.moving_strand:
                     # Update move - use selected move axis mode
-                    axis_shift, axis_ctrl = self._get_move_axis_modifiers(shift_held, ctrl_held)
-                    self._update_move(event.x(), event.y(), shift_held=axis_shift, ctrl_held=axis_ctrl)
+                    self._update_move(event.x(), event.y(), axis_mode=self.move_axis_mode)
                 elif self.current_mode == "attach" and self.attaching:
                     # Update attached strand end position (from AttachModeMixin)
-                    axis_shift, axis_ctrl = self._get_attach_axis_modifiers(shift_held, ctrl_held)
-                    self._update_attach(event.x(), event.y(), shift_held=axis_shift, ctrl_held=axis_ctrl)
+                    self._update_attach(event.x(), event.y(), axis_mode=self.attach_axis_mode)
         else:
             # Not dragging - check for hover states
             if self.current_mode == "move" and self.selected_strand:
@@ -529,7 +527,7 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
 
     def set_attach_axis_mode(self, mode: str):
         """Set the attach axis mode: normal (XZ), vertical (Y), depth (camera)."""
-        valid_modes = {"normal", "vertical", "depth"}
+        valid_modes = {"normal", "vertical", "depth", "along"}
         if mode not in valid_modes:
             return
         self.attach_axis_mode = mode
@@ -546,7 +544,7 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
 
     def set_move_axis_mode(self, mode: str):
         """Set the move axis mode: normal (XZ), vertical (Y), depth (camera)."""
-        valid_modes = {"normal", "vertical", "depth"}
+        valid_modes = {"normal", "vertical", "depth", "along"}
         if mode not in valid_modes:
             return
         self.move_axis_mode = mode
@@ -560,6 +558,34 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         if self.move_axis_mode == "normal":
             return False, False
         return shift_held, ctrl_held
+
+    def _calculate_directional_movement(self, screen_y, direction, state_attr):
+        """Calculate movement along a given direction vector using vertical mouse drag."""
+        direction = np.array(direction, dtype=float)
+        direction_len = np.linalg.norm(direction)
+        if direction_len < 1e-6:
+            return None
+        direction = direction / direction_len
+
+        last_attr = f"{state_attr}_last_screen_y"
+        if not hasattr(self, last_attr):
+            setattr(self, last_attr, screen_y)
+            return np.array([0.0, 0.0, 0.0])
+
+        screen_dy = screen_y - getattr(self, last_attr)
+        setattr(self, last_attr, screen_y)
+
+        # Scale factor based on camera distance for consistent feel
+        axis_speed = self.camera_distance * 0.005
+        axis_delta = -screen_dy * axis_speed
+
+        return direction * axis_delta
+
+    def _reset_directional_movement(self, state_attr):
+        """Reset directional movement tracking for the given state."""
+        last_attr = f"{state_attr}_last_screen_y"
+        if hasattr(self, last_attr):
+            delattr(self, last_attr)
 
     def _orbit_camera(self, dx, dy):
         """Orbit camera around target"""

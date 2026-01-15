@@ -202,10 +202,13 @@ class AttachModeMixin:
         # Reset depth tracking for this attach operation
         if hasattr(self, '_last_depth_screen_y'):
             delattr(self, '_last_depth_screen_y')
+        self._reset_directional_movement("_attach_along")
+        if hasattr(self, "_attach_along_direction"):
+            delattr(self, "_attach_along_direction")
 
         print(f"Attaching new strand '{strand_name}' to {parent_strand.name} (side {side})")
 
-    def _update_attach(self, screen_x, screen_y, shift_held=False, ctrl_held=False):
+    def _update_attach(self, screen_x, screen_y, axis_mode="normal", shift_held=False, ctrl_held=False):
         """Update the attached strand's end position while dragging"""
         if not self.attach_new_strand:
             return
@@ -213,12 +216,20 @@ class AttachModeMixin:
         strand = self.attach_new_strand
         current_point = strand.end.copy()
 
-        if ctrl_held:
+        if axis_mode not in {"normal", "vertical", "depth", "along"}:
+            if ctrl_held:
+                axis_mode = "depth"
+            elif shift_held:
+                axis_mode = "vertical"
+            else:
+                axis_mode = "normal"
+
+        if axis_mode == "depth":
             # Ctrl held: move towards/away from camera (depth movement)
             delta = self._calculate_depth_movement(screen_x, screen_y, current_point)
             if delta is not None:
                 strand.end = np.array(current_point + delta)
-        elif shift_held:
+        elif axis_mode == "vertical":
             # Shift held: move on vertical plane
             new_pos = self._screen_to_vertical_plane(screen_x, screen_y, current_point)
             if new_pos:
@@ -226,6 +237,14 @@ class AttachModeMixin:
                 new_end = current_point.copy()
                 new_end[1] = new_pos[1]
                 strand.end = np.array(new_end)
+        elif axis_mode == "along":
+            direction = getattr(self, "_attach_along_direction", None)
+            if direction is None:
+                direction = current_point - strand.start
+                self._attach_along_direction = np.array(direction, dtype=float)
+            delta = self._calculate_directional_movement(screen_y, direction, "_attach_along")
+            if delta is not None:
+                strand.end = np.array(current_point + delta)
         else:
             # Normal: move on XZ plane at current Y
             new_pos = self._screen_to_ground(screen_x, screen_y, ground_y=current_point[1])
@@ -283,6 +302,9 @@ class AttachModeMixin:
         # Reset depth tracking for next attach
         if hasattr(self, '_last_depth_screen_y'):
             delattr(self, '_last_depth_screen_y')
+        self._reset_directional_movement("_attach_along")
+        if hasattr(self, "_attach_along_direction"):
+            delattr(self, "_attach_along_direction")
 
     def _get_next_attached_strand_name(self, parent_strand):
         """Generate name for new attached strand based on parent"""

@@ -182,6 +182,12 @@ class MainWindow(QMainWindow):
         self.move_mode_group.addAction(self.action_move_depth)
         move_toolbar.addAction(self.action_move_depth)
 
+        self.action_move_along = QAction("Move Along (Other Point)", self)
+        self.action_move_along.setCheckable(True)
+        self.action_move_along.triggered.connect(lambda: self._set_move_axis_mode("along"))
+        self.move_mode_group.addAction(self.action_move_along)
+        move_toolbar.addAction(self.action_move_along)
+
         # === Attach mode options toolbar (new line) ===
         self.addToolBarBreak()
         attach_toolbar = QToolBar("Attach Options")
@@ -209,6 +215,12 @@ class MainWindow(QMainWindow):
         self.action_attach_depth.triggered.connect(lambda: self._set_attach_axis_mode("depth"))
         self.attach_mode_group.addAction(self.action_attach_depth)
         attach_toolbar.addAction(self.action_attach_depth)
+
+        self.action_attach_along = QAction("Attach Along (Other Point)", self)
+        self.action_attach_along.setCheckable(True)
+        self.action_attach_along.triggered.connect(lambda: self._set_attach_axis_mode("along"))
+        self.attach_mode_group.addAction(self.action_attach_along)
+        attach_toolbar.addAction(self.action_attach_along)
 
     def _setup_statusbar(self):
         """Setup the status bar"""
@@ -287,6 +299,8 @@ class MainWindow(QMainWindow):
             self.statusbar.showMessage("Move mode: Y axis", 2000)
         elif mode == "depth":
             self.statusbar.showMessage("Move mode: Camera depth", 2000)
+        elif mode == "along":
+            self.statusbar.showMessage("Move mode: Along other point", 2000)
 
     def _set_attach_axis_mode(self, mode: str):
         """Set the attach axis mode and switch to attach mode."""
@@ -298,6 +312,8 @@ class MainWindow(QMainWindow):
             self.statusbar.showMessage("Attach mode: Y axis", 2000)
         elif mode == "depth":
             self.statusbar.showMessage("Attach mode: Camera depth", 2000)
+        elif mode == "along":
+            self.statusbar.showMessage("Attach mode: Along other point", 2000)
 
     def _on_mode_changed(self, mode: str):
         """Handle mode change from canvas"""

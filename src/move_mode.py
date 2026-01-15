@@ -238,9 +238,13 @@ class MoveModeMixin:
             self.moving_strand = strand
             self.moving_control_point = self.hovered_control_point
             self.move_start_pos = np.array(pos_3d)
+            # Reset directional movement tracking for this drag
+            self._reset_directional_movement("_move_along")
+            if hasattr(self, "_move_along_direction"):
+                delattr(self, "_move_along_direction")
             print(f"Moving {self.hovered_control_point.upper()} of {strand.name}")
 
-    def _update_move(self, screen_x, screen_y, shift_held=False, ctrl_held=False):
+    def _update_move(self, screen_x, screen_y, axis_mode="normal", shift_held=False, ctrl_held=False):
         """
         Update position during move.
 
@@ -248,6 +252,7 @@ class MoveModeMixin:
         - Normal drag: Move on XZ plane (horizontal ground plane)
         - Shift + drag: Move on vertical plane facing camera (Y axis movement)
         - Ctrl + drag: Move towards/away from camera (depth movement)
+        - Along: Move towards/away from the other point on the strand
         """
         if not self.moving_strand or self.move_start_pos is None:
             return
@@ -266,12 +271,20 @@ class MoveModeMixin:
         else:
             current_point = ((strand.start + strand.end) / 2).copy()
 
-        if ctrl_held:
+        if axis_mode not in {"normal", "vertical", "depth", "along"}:
+            if ctrl_held:
+                axis_mode = "depth"
+            elif shift_held:
+                axis_mode = "vertical"
+            else:
+                axis_mode = "normal"
+
+        if axis_mode == "depth":
             # CTRL held: Move towards/away from camera (depth movement)
             delta = self._calculate_depth_movement(screen_x, screen_y, current_point)
             if delta is None:
                 return
-        elif shift_held:
+        elif axis_mode == "vertical":
             # SHIFT held: Move on vertical plane facing camera
             # This makes the box follow the mouse exactly in screen space for Y movement
             new_pos = self._screen_to_vertical_plane(screen_x, screen_y, current_point)
@@ -281,6 +294,28 @@ class MoveModeMixin:
             new_pos = np.array(new_pos)
             # Only take the Y component change, keep X and Z from current position
             delta = np.array([0.0, new_pos[1] - current_point[1], 0.0])
+        elif axis_mode == "along":
+            direction = getattr(self, "_move_along_direction", None)
+            if direction is None:
+                if self.moving_control_point == 'start':
+                    other_point = strand.end.copy()
+                    direction = current_point - other_point
+                elif self.moving_control_point == 'end':
+                    other_point = strand.start.copy()
+                    direction = current_point - other_point
+                elif self.moving_control_point == 'cp1':
+                    other_point = strand.start.copy()
+                    direction = current_point - other_point
+                elif self.moving_control_point == 'cp2':
+                    other_point = strand.end.copy()
+                    direction = current_point - other_point
+                else:
+                    direction = strand.end - strand.start
+                self._move_along_direction = np.array(direction, dtype=float)
+
+            delta = self._calculate_directional_movement(screen_y, direction, "_move_along")
+            if delta is None:
+                return
         else:
             # Normal: Move on XZ plane at current Y height
             current_pos = self._screen_to_ground(screen_x, screen_y, ground_y=current_point[1])
@@ -557,6 +592,9 @@ class MoveModeMixin:
         self.moving_strand = None
         self.moving_control_point = None
         self.move_start_pos = None
+        self._reset_directional_movement("_move_along")
+        if hasattr(self, "_move_along_direction"):
+            delattr(self, "_move_along_direction")
         # Reset depth tracking for next drag
         if hasattr(self, '_last_depth_screen_y'):
             delattr(self, '_last_depth_screen_y')
