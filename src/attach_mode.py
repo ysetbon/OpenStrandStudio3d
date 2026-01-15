@@ -31,15 +31,6 @@ class AttachModeMixin:
         - For regular Strands: Both START and END can be attached to, unless they already have
           an attached strand at that side (check attached_strands list and attachment_side)
         """
-        # DEBUG: Print attachment state for all strands
-        print("=== ATTACHMENT STATE DEBUG ===")
-        for strand in self.strands:
-            attached_info = [(s.name, s.attachment_side) for s in strand.attached_strands]
-            start_free = self._is_endpoint_free(strand, 0)
-            end_free = self._is_endpoint_free(strand, 1)
-            print(f"{strand.name}: attached_strands={attached_info}, start_free={start_free}, end_free={end_free}")
-        print("==============================")
-
         glDisable(GL_LIGHTING)
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
@@ -208,10 +199,13 @@ class AttachModeMixin:
         self.attaching = True
         self.attach_parent_strand = parent_strand
         self.attach_side = side
+        # Reset depth tracking for this attach operation
+        if hasattr(self, '_last_depth_screen_y'):
+            delattr(self, '_last_depth_screen_y')
 
         print(f"Attaching new strand '{strand_name}' to {parent_strand.name} (side {side})")
 
-    def _update_attach(self, screen_x, screen_y, shift_held=False):
+    def _update_attach(self, screen_x, screen_y, shift_held=False, ctrl_held=False):
         """Update the attached strand's end position while dragging"""
         if not self.attach_new_strand:
             return
@@ -219,7 +213,12 @@ class AttachModeMixin:
         strand = self.attach_new_strand
         current_point = strand.end.copy()
 
-        if shift_held:
+        if ctrl_held:
+            # Ctrl held: move towards/away from camera (depth movement)
+            delta = self._calculate_depth_movement(screen_x, screen_y, current_point)
+            if delta is not None:
+                strand.end = np.array(current_point + delta)
+        elif shift_held:
             # Shift held: move on vertical plane
             new_pos = self._screen_to_vertical_plane(screen_x, screen_y, current_point)
             if new_pos:
@@ -281,6 +280,9 @@ class AttachModeMixin:
         self.attach_new_strand = None
         self.attach_parent_strand = None
         self.attach_side = None
+        # Reset depth tracking for next attach
+        if hasattr(self, '_last_depth_screen_y'):
+            delattr(self, '_last_depth_screen_y')
 
     def _get_next_attached_strand_name(self, parent_strand):
         """Generate name for new attached strand based on parent"""

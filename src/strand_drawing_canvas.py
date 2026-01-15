@@ -67,6 +67,7 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         self.attach_new_strand = None
         self.hovered_attach_point = None  # (strand, side) tuple for hover feedback
         self.attach_sphere_radius = 0.3  # Radius of attachment point spheres
+        self.attach_axis_mode = "normal"  # normal (XZ), vertical (Y), depth (camera)
 
         # Rigid mode state - shows start/end point spheres
         self.show_rigid_points = False
@@ -514,8 +515,8 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
                     self._update_move(event.x(), event.y(), shift_held=axis_shift, ctrl_held=axis_ctrl)
                 elif self.current_mode == "attach" and self.attaching:
                     # Update attached strand end position (from AttachModeMixin)
-                    # Note: Ignore Ctrl/Shift in attach mode - only basic mouse movement
-                    self._update_attach(event.x(), event.y(), shift_held=False)
+                    axis_shift, axis_ctrl = self._get_attach_axis_modifiers(shift_held, ctrl_held)
+                    self._update_attach(event.x(), event.y(), shift_held=axis_shift, ctrl_held=axis_ctrl)
         else:
             # Not dragging - check for hover states
             if self.current_mode == "move" and self.selected_strand:
@@ -525,6 +526,23 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
 
         self.last_mouse_pos = event.pos()
         self.update()
+
+    def set_attach_axis_mode(self, mode: str):
+        """Set the attach axis mode: normal (XZ), vertical (Y), depth (camera)."""
+        valid_modes = {"normal", "vertical", "depth"}
+        if mode not in valid_modes:
+            return
+        self.attach_axis_mode = mode
+
+    def _get_attach_axis_modifiers(self, shift_held: bool, ctrl_held: bool):
+        """Return effective modifier flags based on selected attach axis mode."""
+        if self.attach_axis_mode == "vertical":
+            return True, False
+        if self.attach_axis_mode == "depth":
+            return False, True
+        if self.attach_axis_mode == "normal":
+            return False, False
+        return shift_held, ctrl_held
 
     def set_move_axis_mode(self, mode: str):
         """Set the move axis mode: normal (XZ), vertical (Y), depth (camera)."""

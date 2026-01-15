@@ -182,6 +182,34 @@ class MainWindow(QMainWindow):
         self.move_mode_group.addAction(self.action_move_depth)
         move_toolbar.addAction(self.action_move_depth)
 
+        # === Attach mode options toolbar (new line) ===
+        self.addToolBarBreak()
+        attach_toolbar = QToolBar("Attach Options")
+        attach_toolbar.setMovable(False)
+        self.addToolBar(attach_toolbar)
+
+        self.attach_mode_group = QActionGroup(self)
+        self.attach_mode_group.setExclusive(True)
+
+        self.action_attach_xz = QAction("Attach XZ (Normal)", self)
+        self.action_attach_xz.setCheckable(True)
+        self.action_attach_xz.setChecked(True)
+        self.action_attach_xz.triggered.connect(lambda: self._set_attach_axis_mode("normal"))
+        self.attach_mode_group.addAction(self.action_attach_xz)
+        attach_toolbar.addAction(self.action_attach_xz)
+
+        self.action_attach_y = QAction("Attach Y (Shift)", self)
+        self.action_attach_y.setCheckable(True)
+        self.action_attach_y.triggered.connect(lambda: self._set_attach_axis_mode("vertical"))
+        self.attach_mode_group.addAction(self.action_attach_y)
+        attach_toolbar.addAction(self.action_attach_y)
+
+        self.action_attach_depth = QAction("Attach Depth (Ctrl)", self)
+        self.action_attach_depth.setCheckable(True)
+        self.action_attach_depth.triggered.connect(lambda: self._set_attach_axis_mode("depth"))
+        self.attach_mode_group.addAction(self.action_attach_depth)
+        attach_toolbar.addAction(self.action_attach_depth)
+
     def _setup_statusbar(self):
         """Setup the status bar"""
         self.statusbar = QStatusBar()
@@ -259,6 +287,17 @@ class MainWindow(QMainWindow):
             self.statusbar.showMessage("Move mode: Y axis", 2000)
         elif mode == "depth":
             self.statusbar.showMessage("Move mode: Camera depth", 2000)
+
+    def _set_attach_axis_mode(self, mode: str):
+        """Set the attach axis mode and switch to attach mode."""
+        self.canvas.set_attach_axis_mode(mode)
+        self._set_mode("attach")
+        if mode == "normal":
+            self.statusbar.showMessage("Attach mode: XZ plane", 2000)
+        elif mode == "vertical":
+            self.statusbar.showMessage("Attach mode: Y axis", 2000)
+        elif mode == "depth":
+            self.statusbar.showMessage("Attach mode: Camera depth", 2000)
 
     def _on_mode_changed(self, mode: str):
         """Handle mode change from canvas"""
