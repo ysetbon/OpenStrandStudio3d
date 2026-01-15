@@ -58,6 +58,7 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         self.move_start_pos = None  # 3D position where drag started
         self.hovered_control_point = None  # Which control point is hovered: 'start', 'end', 'cp1', 'cp2'
         self.control_point_box_size = 0.25  # Size of control point boxes
+        self.move_axis_mode = "normal"  # normal (XZ), vertical (Y), depth (camera)
 
         # Attach mode state
         self.attaching = False
@@ -508,9 +509,9 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
                     # Update preview while creating strand
                     pass  # Just trigger update below
                 elif self.current_mode == "move" and self.moving_strand:
-                    # Update move - check modifiers for movement direction (from MoveModeMixin)
-                    # Shift = vertical (Y), Ctrl = depth (towards/away from camera)
-                    self._update_move(event.x(), event.y(), shift_held=shift_held, ctrl_held=ctrl_held)
+                    # Update move - use selected move axis mode
+                    axis_shift, axis_ctrl = self._get_move_axis_modifiers(shift_held, ctrl_held)
+                    self._update_move(event.x(), event.y(), shift_held=axis_shift, ctrl_held=axis_ctrl)
                 elif self.current_mode == "attach" and self.attaching:
                     # Update attached strand end position (from AttachModeMixin)
                     # Note: Ignore Ctrl/Shift in attach mode - only basic mouse movement
@@ -524,6 +525,23 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
 
         self.last_mouse_pos = event.pos()
         self.update()
+
+    def set_move_axis_mode(self, mode: str):
+        """Set the move axis mode: normal (XZ), vertical (Y), depth (camera)."""
+        valid_modes = {"normal", "vertical", "depth"}
+        if mode not in valid_modes:
+            return
+        self.move_axis_mode = mode
+
+    def _get_move_axis_modifiers(self, shift_held: bool, ctrl_held: bool):
+        """Return effective modifier flags based on selected move axis mode."""
+        if self.move_axis_mode == "vertical":
+            return True, False
+        if self.move_axis_mode == "depth":
+            return False, True
+        if self.move_axis_mode == "normal":
+            return False, False
+        return shift_held, ctrl_held
 
     def _orbit_camera(self, dx, dy):
         """Orbit camera around target"""

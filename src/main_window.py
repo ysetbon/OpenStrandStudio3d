@@ -7,7 +7,7 @@ import json
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QToolBar, QAction, QStatusBar, QSplitter, QLabel,
-    QFileDialog, QMessageBox
+    QFileDialog, QMessageBox, QActionGroup
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
@@ -154,6 +154,34 @@ class MainWindow(QMainWindow):
         # Track current project file
         self.current_project_file = None
 
+        # === Move mode options toolbar (new line) ===
+        self.addToolBarBreak()
+        move_toolbar = QToolBar("Move Options")
+        move_toolbar.setMovable(False)
+        self.addToolBar(move_toolbar)
+
+        self.move_mode_group = QActionGroup(self)
+        self.move_mode_group.setExclusive(True)
+
+        self.action_move_xz = QAction("Move XZ (Normal)", self)
+        self.action_move_xz.setCheckable(True)
+        self.action_move_xz.setChecked(True)
+        self.action_move_xz.triggered.connect(lambda: self._set_move_axis_mode("normal"))
+        self.move_mode_group.addAction(self.action_move_xz)
+        move_toolbar.addAction(self.action_move_xz)
+
+        self.action_move_y = QAction("Move Y (Shift)", self)
+        self.action_move_y.setCheckable(True)
+        self.action_move_y.triggered.connect(lambda: self._set_move_axis_mode("vertical"))
+        self.move_mode_group.addAction(self.action_move_y)
+        move_toolbar.addAction(self.action_move_y)
+
+        self.action_move_depth = QAction("Move Depth (Ctrl)", self)
+        self.action_move_depth.setCheckable(True)
+        self.action_move_depth.triggered.connect(lambda: self._set_move_axis_mode("depth"))
+        self.move_mode_group.addAction(self.action_move_depth)
+        move_toolbar.addAction(self.action_move_depth)
+
     def _setup_statusbar(self):
         """Setup the status bar"""
         self.statusbar = QStatusBar()
@@ -220,6 +248,17 @@ class MainWindow(QMainWindow):
             self.statusbar.showMessage("Straight segment mode: ON - strands are now straight lines", 3000)
         else:
             self.statusbar.showMessage("Straight segment mode: OFF - curves restored", 3000)
+
+    def _set_move_axis_mode(self, mode: str):
+        """Set the move axis mode and switch to move mode."""
+        self.canvas.set_move_axis_mode(mode)
+        self._set_mode("move")
+        if mode == "normal":
+            self.statusbar.showMessage("Move mode: XZ plane", 2000)
+        elif mode == "vertical":
+            self.statusbar.showMessage("Move mode: Y axis", 2000)
+        elif mode == "depth":
+            self.statusbar.showMessage("Move mode: Camera depth", 2000)
 
     def _on_mode_changed(self, mode: str):
         """Handle mode change from canvas"""
