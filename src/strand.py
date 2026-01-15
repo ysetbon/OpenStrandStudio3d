@@ -302,7 +302,8 @@ class Strand:
             self._draw_tube_from_points(all_points, frames)
 
             # Draw end caps only at the true start and end of the chain
-            self._draw_chain_end_caps(chain)
+            # Pass frames and points so end caps use the same orientation as the tube
+            self._draw_chain_end_caps(chain, all_points, frames)
 
     def _compute_chain_frames(self, points):
         """Compute parallel transport frames for a chain of points"""
@@ -424,21 +425,41 @@ class Strand:
 
         glEnd()
 
-    def _draw_chain_end_caps(self, chain):
-        """Draw end caps only at the true start and end of the chain"""
+    def _draw_chain_end_caps(self, chain, all_points=None, frames=None):
+        """
+        Draw end caps only at the true start and end of the chain.
+
+        Uses the parallel transport frames from tube rendering to ensure
+        end cap orientation matches the tube exactly.
+        """
         if not chain:
             return
 
         first_strand = chain[0]
         last_strand = chain[-1]
 
-        # Start cap
-        tangent_start = first_strand.get_bezier_tangent(0.0)
-        self._draw_ellipsoid_cap(first_strand.start, tangent_start)
+        # Use frames if provided (for consistent orientation with tube)
+        if all_points is not None and frames is not None and len(all_points) >= 2 and len(frames) >= 2:
+            # Start cap - use tangent from first two points (matches tube start)
+            tangent_start = all_points[1] - all_points[0]
+            tangent_len = np.linalg.norm(tangent_start)
+            if tangent_len > 1e-6:
+                tangent_start = tangent_start / tangent_len
+            self._draw_ellipsoid_cap_with_frame(first_strand.start, tangent_start, frames[0])
 
-        # End cap
-        tangent_end = last_strand.get_bezier_tangent(1.0)
-        self._draw_ellipsoid_cap(last_strand.end, tangent_end)
+            # End cap - use tangent from last two points (matches tube end)
+            tangent_end = all_points[-1] - all_points[-2]
+            tangent_len = np.linalg.norm(tangent_end)
+            if tangent_len > 1e-6:
+                tangent_end = tangent_end / tangent_len
+            self._draw_ellipsoid_cap_with_frame(last_strand.end, tangent_end, frames[-1])
+        else:
+            # Fallback to original behavior if frames not provided
+            tangent_start = first_strand.get_bezier_tangent(0.0)
+            self._draw_ellipsoid_cap(first_strand.start, tangent_start)
+
+            tangent_end = last_strand.get_bezier_tangent(1.0)
+            self._draw_ellipsoid_cap(last_strand.end, tangent_end)
 
     def _draw_tube(self):
         """Draw the strand as a tube along the Bezier curve using parallel transport frame"""
@@ -649,6 +670,54 @@ class Strand:
         up_len = np.linalg.norm(up)
         if up_len > 1e-6:
             up /= up_len
+
+        # Build rotation matrix (column vectors: right, up, tangent)
+        rotation = np.array([
+            [right[0], up[0], tangent[0], 0],
+            [right[1], up[1], tangent[1], 0],
+            [right[2], up[2], tangent[2], 0],
+            [0, 0, 0, 1]
+        ], dtype=np.float32)
+
+        glMultMatrixf(rotation.T.flatten())
+
+        # Scale to create ellipsoid: wide in X (right), flat in Y (up), short in Z (tangent)
+        height = self.width * self.height_ratio
+        glScalef(self.width, height, self.width * 0.5)  # Hemisphere depth
+
+        # Enable normal renormalization for correct lighting after scaling
+        glEnable(GL_NORMALIZE)
+
+        quadric = gluNewQuadric()
+        gluQuadricNormals(quadric, GLU_SMOOTH)  # Smooth normals for proper lighting
+        gluSphere(quadric, 1.0, 16, 16)
+        gluDeleteQuadric(quadric)
+
+        glPopMatrix()
+
+    def _draw_ellipsoid_cap_with_frame(self, position, tangent, frame):
+        """
+        Draw an ellipsoid cap using a pre-computed frame for orientation.
+
+        This ensures the cap orientation matches the tube exactly by using
+        the same frame (right, up vectors) computed during parallel transport.
+
+        Args:
+            position: 3D position for the cap
+            tangent: Tangent direction at this point
+            frame: Tuple of (right, up) vectors from parallel transport
+        """
+        glPushMatrix()
+        glTranslatef(*position)
+
+        # Use the pre-computed frame vectors
+        right, up = frame
+
+        # Ensure tangent is normalized
+        tangent = np.array(tangent, dtype=float)
+        tangent_len = np.linalg.norm(tangent)
+        if tangent_len > 1e-6:
+            tangent = tangent / tangent_len
 
         # Build rotation matrix (column vectors: right, up, tangent)
         rotation = np.array([

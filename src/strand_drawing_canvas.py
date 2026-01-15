@@ -513,7 +513,8 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
                     self._update_move(event.x(), event.y(), shift_held=shift_held, ctrl_held=ctrl_held)
                 elif self.current_mode == "attach" and self.attaching:
                     # Update attached strand end position (from AttachModeMixin)
-                    self._update_attach(event.x(), event.y(), shift_held=shift_held)
+                    # Note: Ignore Ctrl/Shift in attach mode - only basic mouse movement
+                    self._update_attach(event.x(), event.y(), shift_held=False)
         else:
             # Not dragging - check for hover states
             if self.current_mode == "move" and self.selected_strand:

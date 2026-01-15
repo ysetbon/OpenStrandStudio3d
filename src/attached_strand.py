@@ -224,6 +224,9 @@ class AttachedStrand(Strand):
 
     def is_end_attachable(self):
         """Check if end point can have strands attached"""
+        self.end_attached = any(
+            getattr(child, "attachment_side", None) == 1 for child in self.attached_strands
+        )
         return not self.end_attached
 
     def to_dict(self):
@@ -233,7 +236,9 @@ class AttachedStrand(Strand):
         data['parent_name'] = self.parent_strand.name
         data['attachment_side'] = self.attachment_side
         data['start_attached'] = self.start_attached
-        data['end_attached'] = self.end_attached
+        data['end_attached'] = any(
+            getattr(child, "attachment_side", None) == 1 for child in self.attached_strands
+        )
         return data
 
     @classmethod

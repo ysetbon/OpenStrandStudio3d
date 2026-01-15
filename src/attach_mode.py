@@ -31,6 +31,15 @@ class AttachModeMixin:
         - For regular Strands: Both START and END can be attached to, unless they already have
           an attached strand at that side (check attached_strands list and attachment_side)
         """
+        # DEBUG: Print attachment state for all strands
+        print("=== ATTACHMENT STATE DEBUG ===")
+        for strand in self.strands:
+            attached_info = [(s.name, s.attachment_side) for s in strand.attached_strands]
+            start_free = self._is_endpoint_free(strand, 0)
+            end_free = self._is_endpoint_free(strand, 1)
+            print(f"{strand.name}: attached_strands={attached_info}, start_free={start_free}, end_free={end_free}")
+        print("==============================")
+
         glDisable(GL_LIGHTING)
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
@@ -85,12 +94,12 @@ class AttachModeMixin:
 
         # For AttachedStrands:
         # - Start (side=0) is NEVER free - it's always connected to parent
-        # - End (side=1) is free only if end_attached is False
+        # - End (side=1) is free only if it has no child attached to its end
         if isinstance(strand, AttachedStrand):
             if side == 0:
                 return False  # Start is always connected to parent
             else:
-                return not strand.end_attached
+                return strand.is_end_attachable()
 
         # For regular Strands:
         # Check if any attached strand is connected at this side
@@ -166,6 +175,12 @@ class AttachModeMixin:
             return
 
         parent_strand, side = self.hovered_attach_point
+
+        # Verify the endpoint is still free (hover state might be stale)
+        if not self._is_endpoint_free(parent_strand, side):
+            print(f"Endpoint {parent_strand.name} side {side} is no longer free")
+            self.hovered_attach_point = None
+            return
 
         # Get attachment point position
         if side == 0:
