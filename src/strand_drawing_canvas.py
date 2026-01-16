@@ -83,9 +83,22 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self.show_axes = True
         self.grid_size = 10
         self.grid_spacing = 1.0
+        self.grid_endless = True
+        self.grid_major_every = 5
+        self.grid_minor_color = (0.55, 0.56, 0.58)
+        self.grid_major_color = (0.42, 0.43, 0.45)
+        self.grid_fade_power = 1.6
+        self.grid_view_radius = 60.0
+        self.grid_max_view_radius = 200.0
+        self.axis_length = 3.5
+        self.axis_radius = 0.05
+        self.axis_tip_length = 0.35
+        self.axis_tip_radius = 0.12
 
         # Rendering settings
-        self.background_color = (0.15, 0.15, 0.15, 1.0)
+        self.background_color = (0.62, 0.63, 0.65, 1.0)
+        self.background_top_color = (0.72, 0.73, 0.75)
+        self.background_bottom_color = (0.58, 0.59, 0.61)
 
         # Enable mouse tracking for hover effects
         self.setMouseTracking(True)
@@ -108,6 +121,8 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         # Enable smooth lines
         glEnable(GL_LINE_SMOOTH)
         glHint(GL_LINE_SMOOTH_HINT, GL_NICEST)
+        glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST)
+        glEnable(GL_MULTISAMPLE)
 
         # Enable lighting
         glEnable(GL_LIGHTING)
@@ -164,6 +179,8 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
     def paintGL(self):
         """Render the scene"""
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        self._draw_background()
+        self._reset_render_state()
         glLoadIdentity()
 
         # Setup camera
@@ -215,54 +232,148 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         # Emit camera info
         self.camera_changed.emit(f"Dist: {self.camera_distance:.1f}, Az: {self.camera_azimuth:.0f}, El: {self.camera_elevation:.0f}")
 
+    def _draw_background(self):
+        """Draw a subtle vertical gradient background in screen space."""
+        glDisable(GL_LIGHTING)
+        glDisable(GL_DEPTH_TEST)
+        glDepthMask(GL_FALSE)
+
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+        glOrtho(0.0, 1.0, 0.0, 1.0, -1.0, 1.0)
+
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+
+        glBegin(GL_QUADS)
+        glColor3f(*self.background_bottom_color)
+        glVertex2f(0.0, 0.0)
+        glVertex2f(1.0, 0.0)
+        glColor3f(*self.background_top_color)
+        glVertex2f(1.0, 1.0)
+        glVertex2f(0.0, 1.0)
+        glEnd()
+
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+
+        glDepthMask(GL_TRUE)
+        glEnable(GL_DEPTH_TEST)
+        glEnable(GL_LIGHTING)
+
+    def _reset_render_state(self):
+        """Ensure a consistent baseline render state each frame."""
+        glEnable(GL_DEPTH_TEST)
+        glDepthFunc(GL_LESS)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glEnable(GL_LINE_SMOOTH)
+        glHint(GL_LINE_SMOOTH_HINT, GL_NICEST)
+        glEnable(GL_LIGHTING)
+
+    def _grid_alpha(self, distance, max_distance, min_alpha, max_alpha):
+        """Fade grid lines as they move away from the view center."""
+        if max_distance <= 0:
+            return max_alpha
+        t = min(1.0, distance / max_distance)
+        fade = (1.0 - t) ** self.grid_fade_power
+        return min_alpha + (max_alpha - min_alpha) * fade
+
     def _draw_grid(self):
         """Draw a reference grid on the XZ plane"""
         glDisable(GL_LIGHTING)
+        base_half_size = self.grid_size * self.grid_spacing / 2
+        if self.grid_endless:
+            view_radius = max(base_half_size, self.camera_distance * 5.0, self.grid_view_radius)
+            view_radius = min(view_radius, self.grid_max_view_radius)
+            origin_x = round(self.camera_target[0] / self.grid_spacing) * self.grid_spacing
+            origin_z = round(self.camera_target[2] / self.grid_spacing) * self.grid_spacing
+            max_index = max(1, int(view_radius / self.grid_spacing))
+        else:
+            view_radius = base_half_size
+            origin_x = 0.0
+            origin_z = 0.0
+            max_index = self.grid_size // 2
+        major_every = self.grid_major_every if self.grid_major_every > 0 else None
+
+        # Minor grid lines
+        glLineWidth(1.0)
         glBegin(GL_LINES)
-
-        half_size = self.grid_size * self.grid_spacing / 2
-
-        # Grid lines (gray)
-        glColor4f(0.3, 0.3, 0.3, 0.5)
-
-        for i in range(-self.grid_size // 2, self.grid_size // 2 + 1):
+        for i in range(-max_index, max_index + 1):
+            if major_every and i % major_every == 0:
+                continue
             pos = i * self.grid_spacing
-            # X direction lines
-            glVertex3f(-half_size, 0, pos)
-            glVertex3f(half_size, 0, pos)
-            # Z direction lines
-            glVertex3f(pos, 0, -half_size)
-            glVertex3f(pos, 0, half_size)
-
+            z = origin_z + pos
+            x = origin_x + pos
+            alpha_z = self._grid_alpha(abs(pos), view_radius, 0.08, 0.28)
+            alpha_x = self._grid_alpha(abs(pos), view_radius, 0.08, 0.28)
+            glColor4f(*self.grid_minor_color, alpha_z)
+            glVertex3f(origin_x - view_radius, 0, z)
+            glVertex3f(origin_x + view_radius, 0, z)
+            glColor4f(*self.grid_minor_color, alpha_x)
+            glVertex3f(x, 0, origin_z - view_radius)
+            glVertex3f(x, 0, origin_z + view_radius)
         glEnd()
+
+        # Major grid lines
+        if major_every:
+            glLineWidth(1.5)
+            glBegin(GL_LINES)
+            for i in range(-max_index, max_index + 1):
+                if i % major_every != 0:
+                    continue
+                pos = i * self.grid_spacing
+                z = origin_z + pos
+                x = origin_x + pos
+                alpha_z = self._grid_alpha(abs(pos), view_radius, 0.16, 0.5)
+                alpha_x = self._grid_alpha(abs(pos), view_radius, 0.16, 0.5)
+                glColor4f(*self.grid_major_color, alpha_z)
+                glVertex3f(origin_x - view_radius, 0, z)
+                glVertex3f(origin_x + view_radius, 0, z)
+                glColor4f(*self.grid_major_color, alpha_x)
+                glVertex3f(x, 0, origin_z - view_radius)
+                glVertex3f(x, 0, origin_z + view_radius)
+            glEnd()
+            glLineWidth(1.0)
+
         glEnable(GL_LIGHTING)
 
     def _draw_axes(self):
         """Draw coordinate axes"""
-        glDisable(GL_LIGHTING)
-        glLineWidth(2.0)
-        glBegin(GL_LINES)
+        axis_length = min(self.axis_length, self.grid_size * self.grid_spacing / 2)
+        self._draw_axis("x", axis_length, (0.9, 0.15, 0.12))
+        self._draw_axis("y", axis_length, (0.12, 0.85, 0.2))
+        self._draw_axis("z", axis_length, (0.12, 0.45, 0.95))
 
-        axis_length = 2.0
+    def _draw_axis(self, axis, length, color):
+        """Draw a thicker axis with a subtle arrow head."""
+        if length <= 0:
+            return
 
-        # X axis - Red
-        glColor3f(1.0, 0.0, 0.0)
-        glVertex3f(0, 0, 0)
-        glVertex3f(axis_length, 0, 0)
+        tip_length = min(self.axis_tip_length, length * 0.4)
+        shaft_length = max(0.0, length - tip_length)
 
-        # Y axis - Green
-        glColor3f(0.0, 1.0, 0.0)
-        glVertex3f(0, 0, 0)
-        glVertex3f(0, axis_length, 0)
+        quadric = gluNewQuadric()
+        gluQuadricNormals(quadric, GLU_SMOOTH)
+        glColor3f(*color)
+        glPushMatrix()
 
-        # Z axis - Blue
-        glColor3f(0.0, 0.0, 1.0)
-        glVertex3f(0, 0, 0)
-        glVertex3f(0, 0, axis_length)
+        if axis == "x":
+            glRotatef(90.0, 0.0, 1.0, 0.0)
+        elif axis == "y":
+            glRotatef(-90.0, 1.0, 0.0, 0.0)
 
-        glEnd()
-        glLineWidth(1.0)
-        glEnable(GL_LIGHTING)
+        if shaft_length > 0:
+            gluCylinder(quadric, self.axis_radius, self.axis_radius, shaft_length, 18, 1)
+            glTranslatef(0.0, 0.0, shaft_length)
+
+        gluCylinder(quadric, self.axis_tip_radius, 0.0, tip_length, 18, 1)
+        glPopMatrix()
+        gluDeleteQuadric(quadric)
 
     def _draw_strands(self):
         """Draw all strands in the scene"""

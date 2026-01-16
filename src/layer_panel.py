@@ -269,7 +269,8 @@ class LayerPanel(QWidget):
                 font-size: 14px;
                 font-weight: bold;
                 padding: 5px;
-                background-color: #2a2a2a;
+                background-color: #d9dbdf;
+                color: #2b2b2b;
                 border-radius: 4px;
             }
         """)
@@ -277,7 +278,7 @@ class LayerPanel(QWidget):
 
         # Info label
         self.info_label = QLabel("No strands - use Add Strand mode")
-        self.info_label.setStyleSheet("color: #888888; padding: 10px;")
+        self.info_label.setStyleSheet("color: #6b6f75; padding: 10px;")
         self.info_label.setWordWrap(True)
         layout.addWidget(self.info_label)
 
@@ -324,23 +325,24 @@ class LayerPanel(QWidget):
 
         layout.addLayout(buttons_layout2)
 
-        # Apply dark theme
+        # Apply light theme
         self.setStyleSheet("""
             QWidget {
-                background-color: #1e1e1e;
-                color: #ffffff;
+                background-color: #e4e5e7;
+                color: #2b2b2b;
             }
             QPushButton {
-                background-color: #3a3a3a;
-                border: 1px solid #555555;
+                background-color: #f2f3f4;
+                border: 1px solid #b7bbc0;
                 border-radius: 4px;
                 padding: 5px 10px;
+                color: #2b2b2b;
             }
             QPushButton:hover {
-                background-color: #4a4a4a;
+                background-color: #e6e8ea;
             }
             QPushButton:pressed {
-                background-color: #2a2a2a;
+                background-color: #d8dade;
             }
         """)
 

@@ -3,6 +3,7 @@ OpenStrandStudio 3D - Attach Mode
 Handles all attach mode functionality for the canvas
 """
 
+import math
 import numpy as np
 from PyQt5.QtCore import Qt
 from OpenGL.GL import *
@@ -105,23 +106,62 @@ class AttachModeMixin:
 
     def _draw_attachment_sphere(self, position, color):
         """Draw a semi-transparent sphere at attachment point"""
+        was_lighting = glIsEnabled(GL_LIGHTING)
+        if not was_lighting:
+            glEnable(GL_LIGHTING)
+
+        glMaterialfv(GL_FRONT, GL_SPECULAR, [0.9, 0.9, 0.95, 1.0])
+        glMaterialf(GL_FRONT, GL_SHININESS, 96.0)
+
+        quadric = gluNewQuadric()
+        gluQuadricNormals(quadric, GLU_SMOOTH)
+        gluQuadricDrawStyle(quadric, GLU_FILL)
         glPushMatrix()
         glTranslatef(*position)
         glColor4f(*color)
-
-        quadric = gluNewQuadric()
-        gluQuadricDrawStyle(quadric, GLU_FILL)
-        gluSphere(quadric, self.attach_sphere_radius, 16, 16)
-        gluDeleteQuadric(quadric)
-
-        # Draw wireframe for better visibility
-        glColor4f(color[0] * 0.5, color[1] * 0.5, color[2] * 0.5, 1.0)
-        quadric = gluNewQuadric()
-        gluQuadricDrawStyle(quadric, GLU_LINE)
-        gluSphere(quadric, self.attach_sphere_radius * 1.02, 12, 12)
-        gluDeleteQuadric(quadric)
-
+        gluSphere(quadric, self.attach_sphere_radius, 32, 32)
         glPopMatrix()
+        gluDeleteQuadric(quadric)
+
+        # Add a soft highlight to enhance the 3D feel without edges.
+        glMaterialfv(GL_FRONT, GL_SPECULAR, [0.7, 0.7, 0.7, 1.0])
+        glMaterialf(GL_FRONT, GL_SHININESS, 64.0)
+        glDisable(GL_LIGHTING)
+
+        azimuth_rad = math.radians(self.camera_azimuth)
+        elevation_rad = math.radians(self.camera_elevation)
+        camera_x = self.camera_target[0] + self.camera_distance * math.cos(elevation_rad) * math.sin(azimuth_rad)
+        camera_y = self.camera_target[1] + self.camera_distance * math.sin(elevation_rad)
+        camera_z = self.camera_target[2] + self.camera_distance * math.cos(elevation_rad) * math.cos(azimuth_rad)
+        camera_pos = np.array([camera_x, camera_y, camera_z], dtype=float)
+        to_camera = camera_pos - np.array(position, dtype=float)
+        to_camera_len = np.linalg.norm(to_camera)
+        if to_camera_len > 1e-6:
+            to_camera /= to_camera_len
+
+            highlight_pos = np.array(position, dtype=float) + to_camera * (self.attach_sphere_radius * 0.25)
+            highlight_color = (
+                min(color[0] + 0.35, 1.0),
+                min(color[1] + 0.35, 1.0),
+                min(color[2] + 0.35, 1.0),
+                min(color[3] + 0.25, 1.0)
+            )
+
+            glDepthMask(GL_FALSE)
+            quadric = gluNewQuadric()
+            gluQuadricNormals(quadric, GLU_SMOOTH)
+            gluQuadricDrawStyle(quadric, GLU_FILL)
+            glPushMatrix()
+            glTranslatef(*highlight_pos)
+            glColor4f(*highlight_color)
+            gluSphere(quadric, self.attach_sphere_radius * 0.45, 24, 24)
+            glPopMatrix()
+            gluDeleteQuadric(quadric)
+            glDepthMask(GL_TRUE)
+
+        if was_lighting:
+            glEnable(GL_LIGHTING)
+
 
     def _update_attach_point_hover(self, screen_x, screen_y):
         """Update which attachment point is being hovered (only free endpoints)"""
