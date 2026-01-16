@@ -110,9 +110,8 @@ class LayerButton(QPushButton):
             }}
         """)
 
-        # Set text with visibility indicator
-        visibility_icon = "👁" if self.is_visible else "○"
-        self.setText(f"{visibility_icon}  {self.strand_name}")
+        # Set text (strand name only)
+        self.setText(self.strand_name)
 
     def set_selected(self, selected: bool):
         """Set selection state"""

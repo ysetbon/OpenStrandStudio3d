@@ -82,6 +82,11 @@ class MainWindow(QMainWindow):
         self.action_load.triggered.connect(self._load_project)
         toolbar.addAction(self.action_load)
 
+        # Clear all strands
+        self.action_clear_all = QAction("Clear All", self)
+        self.action_clear_all.triggered.connect(self._clear_all_strands)
+        toolbar.addAction(self.action_clear_all)
+
         toolbar.addSeparator()
 
         # === Mode selection ===
@@ -328,6 +333,10 @@ class MainWindow(QMainWindow):
         self.layer_panel.add_strand(strand_name)
         self.statusbar.showMessage(f"Created strand: {strand_name}", 3000)
 
+        # Automatically switch to attach mode after creating a new strand
+        # This follows the pattern from OpenStrand 106
+        self._set_mode("attach")
+
     def _on_strand_selected(self, strand_name: str):
         """Handle strand selection"""
         self.layer_panel.select_strand(strand_name)
@@ -355,6 +364,11 @@ class MainWindow(QMainWindow):
         self.current_project_file = None
         self.setWindowTitle("OpenStrandStudio 3D - New Project")
         self.statusbar.showMessage("New project created", 3000)
+
+    def _clear_all_strands(self):
+        """Clear all strands from the canvas"""
+        self.canvas.clear_project()
+        self.layer_panel.clear()
 
     def _save_project(self):
         """Save the project to a JSON file"""

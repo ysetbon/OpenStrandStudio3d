@@ -615,14 +615,11 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                     self._orbit_camera(dx, dy)
 
             elif self.mouse_button == Qt.RightButton:
-                if shift_held:
-                    # Shift + Right mouse: Pan (alternative)
-                    self._pan_camera(dx, dy)
-                else:
-                    # Right mouse drag: Orbit
-                    self._orbit_camera(dx, dy)
+                # Right mouse drag: Orbit (rotate view)
+                self._orbit_camera(dx, dy)
 
             elif self.mouse_button == Qt.LeftButton:
+                # Strand operations take priority
                 if self.creating_strand:
                     # Update preview while creating strand
                     pass  # Just trigger update below
@@ -632,6 +629,9 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                 elif self.current_mode == "attach" and self.attaching:
                     # Update attached strand end position (from AttachModeMixin)
                     self._update_attach(event.x(), event.y(), axis_mode=self.attach_axis_mode)
+                else:
+                    # Default: Left mouse drag = Pan (move view)
+                    self._pan_camera(dx, dy)
         else:
             # Not dragging - check for hover states
             if self.current_mode == "select":
