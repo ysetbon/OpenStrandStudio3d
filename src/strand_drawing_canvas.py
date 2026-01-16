@@ -12,11 +12,12 @@ from PyQt5.QtGui import QMouseEvent, QWheelEvent, QKeyEvent
 from OpenGL.GL import *
 from OpenGL.GLU import *
 
+from select_mode import SelectModeMixin
 from move_mode import MoveModeMixin
 from attach_mode import AttachModeMixin
 
 
-class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
+class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachModeMixin):
     """3D OpenGL canvas for strand visualization and manipulation"""
 
     # Signals
@@ -274,6 +275,11 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         if self.selected_strand and self.selected_strand.visible:
             self.selected_strand.draw_selection_highlight()
 
+        # Draw hover highlight separately (avoid stacking with selection)
+        if (self.hovered_strand and self.hovered_strand.visible and
+                self.hovered_strand != self.selected_strand):
+            self.hovered_strand.draw_hover_highlight()
+
     def _draw_strand_preview(self):
         """Draw preview while creating a new strand"""
         if self.new_strand_start is None:
@@ -517,7 +523,9 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
                     self._update_attach(event.x(), event.y(), axis_mode=self.attach_axis_mode)
         else:
             # Not dragging - check for hover states
-            if self.current_mode == "move" and self.selected_strand:
+            if self.current_mode == "select":
+                self._update_select_hover(event.x(), event.y())
+            elif self.current_mode == "move" and self.selected_strand:
                 self._update_control_point_hover(event.x(), event.y())
             elif self.current_mode == "attach":
                 self._update_attach_point_hover(event.x(), event.y())
@@ -794,45 +802,6 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
 
         return max_set + 1
 
-    def _try_select_strand(self, screen_x, screen_y):
-        """Try to select a strand at the given screen position"""
-        # Simple ray-based selection (can be improved)
-        closest_strand = None
-        closest_dist = float('inf')
-
-        for strand in self.strands:
-            dist = self._get_strand_screen_distance(strand, screen_x, screen_y)
-            if dist < closest_dist and dist < 20:  # 20 pixel threshold
-                closest_dist = dist
-                closest_strand = strand
-
-        self.selected_strand = closest_strand
-
-        if closest_strand:
-            self.strand_selected.emit(closest_strand.name)
-        else:
-            self.strand_selected.emit("")
-
-    def _get_strand_screen_distance(self, strand, screen_x, screen_y):
-        """Get approximate screen distance to a strand"""
-        # Project strand midpoint to screen
-        viewport = glGetIntegerv(GL_VIEWPORT)
-        modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
-        projection = glGetDoublev(GL_PROJECTION_MATRIX)
-
-        midpoint = (strand.start + strand.end) / 2
-
-        try:
-            screen_pos = gluProject(midpoint[0], midpoint[1], midpoint[2],
-                                   modelview, projection, viewport)
-
-            dx = screen_pos[0] - screen_x
-            dy = (viewport[3] - screen_pos[1]) - screen_y
-
-            return math.sqrt(dx * dx + dy * dy)
-        except:
-            return float('inf')
-
     def _delete_selected_strand(self):
         """Delete the currently selected strand"""
         if self.selected_strand:
@@ -928,6 +897,10 @@ class StrandDrawingCanvas(QOpenGLWidget, MoveModeMixin, AttachModeMixin):
         self.attach_parent_strand = None
         self.attach_side = None
         self.hovered_attach_point = None
+
+        # Clear selection hover state
+        self.hovered_strand = None
+        self.setCursor(Qt.ArrowCursor)
 
         self.update()
 

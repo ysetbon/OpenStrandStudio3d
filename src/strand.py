@@ -166,37 +166,34 @@ class Strand:
         """
         Draw a semi-transparent highlight overlay for this strand only.
         Used to show which strand is selected within a chain.
-        - 80% transparent (alpha = 0.2)
-        - 20% thicker than normal
         """
+        self._draw_highlight(color=(1.0, 0.0, 0.0, 0.2), width_scale=1.5)
+
+    def draw_hover_highlight(self):
+        """Draw a subtle hover highlight for this strand."""
+        self._draw_highlight(color=(1.0, 0.85, 0.2, 0.25), width_scale=1.25)
+
+    def _draw_highlight(self, color, width_scale):
+        """Draw a semi-transparent overlay along this strand."""
         if not self.visible:
             return
 
-        # Get curve points for just this strand
         curve_points = self.get_curve_points()
         if len(curve_points) < 2:
             return
 
-        # Compute frames for this strand's curve
         frames = self._compute_parallel_frames(curve_points)
         if len(frames) < 2:
             return
 
-        # Store original width and set highlight width (50% thicker)
-        original_width = self.width
-        highlight_width = self.width * 1.5
+        highlight_width = self.width * width_scale
 
-        # Enable blending for transparency
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-
-        # Disable depth writing so highlight shows on top
         glDepthMask(GL_FALSE)
 
-        # Red highlight with 20% opacity (80% transparent)
-        glColor4f(1.0, 0.0, 0.0, 0.2)
+        glColor4f(*color)
 
-        # Draw the highlight tube
         height = highlight_width * self.height_ratio
 
         glBegin(GL_QUAD_STRIP)
@@ -211,11 +208,9 @@ class Strand:
                 idx = j % self.tube_segments
                 angle = 2 * np.pi * idx / self.tube_segments
 
-                # Elliptical cross-section with highlight width
                 cos_a = np.cos(angle)
                 sin_a = np.sin(angle)
 
-                # First ring vertex
                 offset1 = highlight_width * cos_a * right1 + height * sin_a * up1
                 v1 = center1 + offset1
                 n1 = cos_a * right1 + sin_a * up1
@@ -225,7 +220,6 @@ class Strand:
                 glNormal3f(*n1)
                 glVertex3f(*v1)
 
-                # Second ring vertex
                 offset2 = highlight_width * cos_a * right2 + height * sin_a * up2
                 v2 = center2 + offset2
                 n2 = cos_a * right2 + sin_a * up2
@@ -237,7 +231,6 @@ class Strand:
 
         glEnd()
 
-        # Re-enable depth writing
         glDepthMask(GL_TRUE)
         glDisable(GL_BLEND)
 
