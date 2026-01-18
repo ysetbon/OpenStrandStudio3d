@@ -4,6 +4,7 @@ OpenGL-based 3D canvas for rendering and manipulating strands
 """
 
 import math
+import time
 import numpy as np
 from PyQt5.QtWidgets import QOpenGLWidget
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint
@@ -77,6 +78,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         # Straight segment mode state - forces strands to be straight lines
         self.straight_segment_mode = False
         self.saved_control_points = {}  # Maps strand id -> saved CP data for restoration
+
+        # Move mode rendering throttle (max FPS while dragging a strand)
+        self.move_fps_limit = 30.0
+        self._last_move_frame_time = 0.0
 
         # Grid and axes settings
         self.show_grid = True
@@ -624,6 +629,7 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             elif self.current_mode == "move":
                 # Start moving selected strand or control point (from MoveModeMixin)
                 self._start_move(event.x(), event.y())
+                self._last_move_frame_time = 0.0
 
             elif self.current_mode == "attach":
                 # Start attaching a new strand (from AttachModeMixin)
@@ -676,6 +682,8 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         shift_held = bool(modifiers & Qt.ShiftModifier)
         ctrl_held = bool(modifiers & Qt.ControlModifier)
 
+        update_needed = True
+
         if self.mouse_pressed:
             if self.mouse_button == Qt.MiddleButton:
                 if ctrl_held:
@@ -701,8 +709,11 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                     # Update preview while creating strand
                     pass  # Just trigger update below
                 elif self.current_mode == "move" and self.moving_strand:
-                    # Update move - use selected move axis mode
-                    self._update_move(event.x(), event.y(), axis_mode=self.move_axis_mode)
+                    if self._should_process_move_frame():
+                        # Update move - use selected move axis mode
+                        self._update_move(event.x(), event.y(), axis_mode=self.move_axis_mode)
+                    else:
+                        update_needed = False
                 elif self.current_mode == "attach" and self.attaching:
                     # Update attached strand end position (from AttachModeMixin)
                     self._update_attach(event.x(), event.y(), axis_mode=self.attach_axis_mode)
@@ -719,7 +730,19 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                 self._update_attach_point_hover(event.x(), event.y())
 
         self.last_mouse_pos = event.pos()
-        self.update()
+        if update_needed:
+            self.update()
+
+    def _should_process_move_frame(self):
+        """Throttle move-mode updates to avoid redrawing faster than the FPS limit."""
+        if self.move_fps_limit <= 0:
+            return True
+        now = time.perf_counter()
+        min_interval = 1.0 / self.move_fps_limit
+        if now - self._last_move_frame_time < min_interval:
+            return False
+        self._last_move_frame_time = now
+        return True
 
     def set_attach_axis_mode(self, mode: str):
         """Set the attach axis mode: normal (XZ), vertical (Y), depth (camera)."""
