@@ -235,6 +235,7 @@ class AttachModeMixin:
         direction = strand.end - strand.start
         strand.control_point1 = strand.start + direction * 0.33
         strand.control_point2 = strand.start + direction * 0.67
+        strand._mark_geometry_dirty()
 
         self.attaching = True
         self.attach_parent_strand = parent_strand
@@ -296,6 +297,7 @@ class AttachModeMixin:
         direction = strand.end - strand.start
         strand.control_point1 = strand.start + direction * 0.33
         strand.control_point2 = strand.start + direction * 0.67
+        strand._mark_geometry_dirty()
 
     def _finish_attach(self, screen_x, screen_y):
         """Finalize the attachment"""

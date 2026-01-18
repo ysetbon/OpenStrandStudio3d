@@ -40,12 +40,20 @@ class Strand:
         self.height_ratio = 0.4  # Height is 40% of width (2.5:1 flat ratio for plastic leather look)
         self.visible = True
 
+        # Geometry caches (invalidated on control point changes)
+        self._geom_version = 0
+        self._curve_cache = {}
+        self._frame_cache = {}
+        self._chain_cache = {}
+        self._vbo_cache = {}
+        self._vbo_enabled = True
+
         # Calculate initial control points (1/3 and 2/3 along the strand)
         self._init_control_points()
 
         # Rendering settings
-        self.tube_segments = 24  # Segments around circumference (more for smooth ellipse)
-        self.curve_segments = 32  # Segments along curve length
+        self.tube_segments = 40  # Segments around circumference (balanced for speed/quality)
+        self.curve_segments = 56  # Segments along curve length for smoother bends
 
         # Selection/highlight state
         self.is_selected = False
@@ -66,6 +74,43 @@ class Strand:
         # Keep them in the same XZ plane as start/end (no Y offset)
         self.control_point1 = self.start + direction * 0.33
         self.control_point2 = self.start + direction * 0.67
+        self._mark_geometry_dirty()
+
+    def _mark_geometry_dirty(self):
+        """Invalidate cached curve data when geometry changes."""
+        self._geom_version += 1
+        self._curve_cache.clear()
+        self._frame_cache.clear()
+        if len(self._chain_cache) > 0:
+            self._chain_cache.clear()
+        self._clear_vbo_cache()
+
+    def _clear_vbo_cache(self):
+        """Delete cached VBOs to avoid stale geometry and GPU leaks."""
+        if not self._vbo_cache:
+            return
+        for entry in self._vbo_cache.values():
+            self._delete_vbo_entry(entry)
+        self._vbo_cache.clear()
+
+    def _delete_vbo_entry(self, entry):
+        """Delete VBO resources safely."""
+        if not entry:
+            return
+        buffers = [entry.get("vbo_vertices"), entry.get("vbo_normals")]
+        buffers = [buf for buf in buffers if buf]
+        if not buffers:
+            return
+        try:
+            glDeleteBuffers(buffers)
+        except Exception:
+            pass
+
+    def _prune_vbo_cache(self, max_entries=6):
+        """Limit VBO cache growth by clearing when it gets too large."""
+        if len(self._vbo_cache) <= max_entries:
+            return
+        self._clear_vbo_cache()
 
     def get_bezier_point(self, t):
         """
@@ -128,14 +173,36 @@ class Strand:
         if num_segments is None:
             num_segments = self.curve_segments
 
+        cached = self._curve_cache.get(num_segments)
+        if cached and cached[0] == self._geom_version:
+            return cached[1]
+
         points = []
         for i in range(num_segments + 1):
             t = i / num_segments
             points.append(self.get_bezier_point(t))
 
+        self._curve_cache[num_segments] = (self._geom_version, points)
         return points
 
-    def draw(self, is_selected=False, is_hovered=False):
+    def _get_curve_points_and_frames(self, num_segments=None):
+        """Return cached curve points and frames for the given resolution."""
+        if num_segments is None:
+            num_segments = self.curve_segments
+
+        points = self.get_curve_points(num_segments)
+        if len(points) < 2:
+            return points, []
+
+        cached = self._frame_cache.get(num_segments)
+        if cached and cached[0] == self._geom_version:
+            return points, cached[1]
+
+        frames = self._compute_parallel_frames(points)
+        self._frame_cache[num_segments] = (self._geom_version, frames)
+        return points, frames
+
+    def draw(self, is_selected=False, is_hovered=False, lod=None):
         """
         Draw the strand as a 3D tube along the Bezier curve.
 
@@ -154,35 +221,49 @@ class Strand:
 
         glColor3f(*color)
 
+        curve_segments = self.curve_segments
+        tube_segments = self.tube_segments
+        cap_segments = 32
+        if lod:
+            curve_segments = lod.get("curve_segments", curve_segments)
+            tube_segments = lod.get("tube_segments", tube_segments)
+            cap_segments = lod.get("cap_segments", cap_segments)
+
         # Check if this strand is a root (not attached to anything)
         # If so, draw the entire chain as one continuous spline
         if self._is_chain_root():
-            self._draw_chain_as_spline()
+            self._draw_chain_as_spline(
+                curve_segments=curve_segments,
+                tube_segments=tube_segments,
+                cap_segments=cap_segments
+            )
         else:
             # This strand will be drawn as part of its parent's chain
             pass
 
-    def draw_selection_highlight(self):
+    def draw_selection_highlight(self, lod=None):
         """
         Draw a semi-transparent highlight overlay for this strand only.
         Used to show which strand is selected within a chain.
         """
-        self._draw_highlight(color=(1.0, 0.0, 0.0, 0.2), width_scale=1.5)
+        self._draw_highlight(color=(1.0, 0.0, 0.0, 0.2), width_scale=1.5, lod=lod)
 
-    def draw_hover_highlight(self):
+    def draw_hover_highlight(self, lod=None):
         """Draw a subtle hover highlight for this strand."""
-        self._draw_highlight(color=(1.0, 0.85, 0.2, 0.25), width_scale=1.25)
+        self._draw_highlight(color=(1.0, 0.85, 0.2, 0.25), width_scale=1.25, lod=lod)
 
-    def _draw_highlight(self, color, width_scale):
+    def _draw_highlight(self, color, width_scale, lod=None):
         """Draw a semi-transparent overlay along this strand."""
         if not self.visible:
             return
 
-        curve_points = self.get_curve_points()
-        if len(curve_points) < 2:
-            return
+        curve_segments = self.curve_segments
+        tube_segments = self.tube_segments
+        if lod:
+            curve_segments = lod.get("curve_segments", curve_segments)
+            tube_segments = lod.get("tube_segments", tube_segments)
 
-        frames = self._compute_parallel_frames(curve_points)
+        curve_points, frames = self._get_curve_points_and_frames(curve_segments)
         if len(frames) < 2:
             return
 
@@ -204,9 +285,9 @@ class Strand:
             center1 = curve_points[i]
             center2 = curve_points[i + 1]
 
-            for j in range(self.tube_segments + 1):
-                idx = j % self.tube_segments
-                angle = 2 * np.pi * idx / self.tube_segments
+            for j in range(tube_segments + 1):
+                idx = j % tube_segments
+                angle = 2 * np.pi * idx / tube_segments
 
                 cos_a = np.cos(angle)
                 sin_a = np.sin(angle)
@@ -266,37 +347,183 @@ class Strand:
             for attached in end_attachments:
                 attached._collect_chains(current_chain, all_chains)
 
-    def _draw_chain_as_spline(self):
+    def _draw_chain_as_spline(self, curve_segments=None, tube_segments=None, cap_segments=32):
         """Draw the entire strand chain as one continuous Bezier spline"""
+        if curve_segments is None:
+            curve_segments = self.curve_segments
+        if tube_segments is None:
+            tube_segments = self.tube_segments
+
         chains = self._get_chain_strands()
 
         for chain in chains:
             if not chain:
                 continue
 
-            # Collect all curve points from all strands in the chain
-            all_points = []
-            for i, strand in enumerate(chain):
-                points = strand.get_curve_points()
-                if i == 0:
-                    # First strand - include all points
-                    all_points.extend(points)
-                else:
-                    # Skip first point (it's the same as previous strand's last point)
-                    all_points.extend(points[1:])
+            all_points, frames = self._get_chain_geometry(chain, curve_segments)
 
             if len(all_points) < 2:
                 continue
 
-            # Compute parallel transport frames for the entire chain
-            frames = self._compute_chain_frames(all_points)
-
-            # Draw as one continuous tube
-            self._draw_tube_from_points(all_points, frames)
+            vbo_entry = self._get_or_build_chain_vbo(
+                chain,
+                all_points,
+                frames,
+                curve_segments=curve_segments,
+                tube_segments=tube_segments
+            )
+            if vbo_entry:
+                self._draw_tube_vbo(vbo_entry)
+            else:
+                # Draw as one continuous tube (fallback)
+                self._draw_tube_from_points(all_points, frames, tube_segments=tube_segments)
 
             # Draw end caps only at the true start and end of the chain
             # Pass frames and points so end caps use the same orientation as the tube
-            self._draw_chain_end_caps(chain, all_points, frames)
+            self._draw_chain_end_caps(chain, all_points, frames, cap_segments=cap_segments)
+
+    def _get_chain_geometry(self, chain, curve_segments):
+        """Get cached chain points/frames keyed by strand versions and resolution."""
+        versions = tuple((id(strand), strand._geom_version) for strand in chain)
+        key = (curve_segments, versions)
+        cached = self._chain_cache.get(key)
+        if cached:
+            return cached
+
+        all_points = []
+        for i, strand in enumerate(chain):
+            points = strand.get_curve_points(curve_segments)
+            if i == 0:
+                all_points.extend(points)
+            else:
+                all_points.extend(points[1:])
+
+        frames = self._compute_chain_frames(all_points)
+        self._chain_cache[key] = (all_points, frames)
+
+        if len(self._chain_cache) > 8:
+            self._chain_cache.clear()
+
+        return all_points, frames
+
+    def _get_or_build_chain_vbo(self, chain, points, frames, curve_segments, tube_segments):
+        """Get or build a VBO for the given chain geometry and LOD."""
+        if not self._vbo_enabled:
+            return None
+
+        versions = tuple((id(strand), strand._geom_version) for strand in chain)
+        key = (curve_segments, tube_segments, versions)
+        cached = self._vbo_cache.get(key)
+        if cached:
+            return cached
+
+        vertices, normals = self._build_tube_mesh(points, frames, tube_segments)
+        if vertices.size == 0:
+            return None
+
+        try:
+            vbo_vertices = glGenBuffers(1)
+            vbo_normals = glGenBuffers(1)
+            glBindBuffer(GL_ARRAY_BUFFER, vbo_vertices)
+            glBufferData(GL_ARRAY_BUFFER, vertices.nbytes, vertices, GL_STATIC_DRAW)
+            glBindBuffer(GL_ARRAY_BUFFER, vbo_normals)
+            glBufferData(GL_ARRAY_BUFFER, normals.nbytes, normals, GL_STATIC_DRAW)
+            glBindBuffer(GL_ARRAY_BUFFER, 0)
+        except Exception:
+            self._vbo_enabled = False
+            return None
+
+        entry = {
+            "vbo_vertices": vbo_vertices,
+            "vbo_normals": vbo_normals,
+            "vertex_count": vertices.size // 3
+        }
+        self._vbo_cache[key] = entry
+        self._prune_vbo_cache()
+        return entry
+
+    def _build_tube_mesh(self, points, frames, tube_segments):
+        """Build triangle mesh data for a tube and return vertex/normal arrays."""
+        if len(points) < 2 or len(frames) < 2 or tube_segments < 3:
+            return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
+
+        height = self.width * self.height_ratio
+        vertices = []
+        normals = []
+        ring_count = tube_segments
+
+        for i in range(len(points) - 1):
+            right1, up1 = frames[i]
+            right2, up2 = frames[i + 1]
+            center1 = points[i]
+            center2 = points[i + 1]
+
+            for j in range(ring_count):
+                j_next = (j + 1) % ring_count
+                angle0 = 2 * np.pi * j / ring_count
+                angle1 = 2 * np.pi * j_next / ring_count
+
+                cos0 = np.cos(angle0)
+                sin0 = np.sin(angle0)
+                cos1 = np.cos(angle1)
+                sin1 = np.sin(angle1)
+
+                v00 = center1 + (self.width * cos0 * right1 + height * sin0 * up1)
+                v01 = center1 + (self.width * cos1 * right1 + height * sin1 * up1)
+                v10 = center2 + (self.width * cos0 * right2 + height * sin0 * up2)
+                v11 = center2 + (self.width * cos1 * right2 + height * sin1 * up2)
+
+                n00 = cos0 * right1 + sin0 * up1
+                n01 = cos1 * right1 + sin1 * up1
+                n10 = cos0 * right2 + sin0 * up2
+                n11 = cos1 * right2 + sin1 * up2
+
+                n00_len = np.linalg.norm(n00)
+                n01_len = np.linalg.norm(n01)
+                n10_len = np.linalg.norm(n10)
+                n11_len = np.linalg.norm(n11)
+                if n00_len > 1e-6:
+                    n00 = n00 / n00_len
+                if n01_len > 1e-6:
+                    n01 = n01 / n01_len
+                if n10_len > 1e-6:
+                    n10 = n10 / n10_len
+                if n11_len > 1e-6:
+                    n11 = n11 / n11_len
+
+                # Triangle 1: v00, v10, v11
+                vertices.extend([v00[0], v00[1], v00[2],
+                                 v10[0], v10[1], v10[2],
+                                 v11[0], v11[1], v11[2]])
+                normals.extend([n00[0], n00[1], n00[2],
+                                n10[0], n10[1], n10[2],
+                                n11[0], n11[1], n11[2]])
+
+                # Triangle 2: v00, v11, v01
+                vertices.extend([v00[0], v00[1], v00[2],
+                                 v11[0], v11[1], v11[2],
+                                 v01[0], v01[1], v01[2]])
+                normals.extend([n00[0], n00[1], n00[2],
+                                n11[0], n11[1], n11[2],
+                                n01[0], n01[1], n01[2]])
+
+        return np.array(vertices, dtype=np.float32), np.array(normals, dtype=np.float32)
+
+    def _draw_tube_vbo(self, entry):
+        """Draw a cached tube mesh from VBOs."""
+        glEnableClientState(GL_VERTEX_ARRAY)
+        glEnableClientState(GL_NORMAL_ARRAY)
+
+        glBindBuffer(GL_ARRAY_BUFFER, entry["vbo_vertices"])
+        glVertexPointer(3, GL_FLOAT, 0, None)
+        glBindBuffer(GL_ARRAY_BUFFER, entry["vbo_normals"])
+        glNormalPointer(GL_FLOAT, 0, None)
+
+        glDrawArrays(GL_TRIANGLES, 0, entry["vertex_count"])
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0)
+        glDisableClientState(GL_NORMAL_ARRAY)
+        glDisableClientState(GL_VERTEX_ARRAY)
 
     def _compute_chain_frames(self, points):
         """Compute parallel transport frames for a chain of points"""
@@ -377,10 +604,13 @@ class Strand:
         sin_a = np.sin(angle)
         return v * cos_a + np.cross(axis, v) * sin_a + axis * np.dot(axis, v) * (1 - cos_a)
 
-    def _draw_tube_from_points(self, points, frames):
+    def _draw_tube_from_points(self, points, frames, tube_segments=None):
         """Draw a tube along the given points using the provided frames"""
         if len(points) < 2 or len(frames) < 2:
             return
+
+        if tube_segments is None:
+            tube_segments = self.tube_segments
 
         height = self.width * self.height_ratio
 
@@ -392,9 +622,9 @@ class Strand:
             center1 = points[i]
             center2 = points[i + 1]
 
-            for j in range(self.tube_segments + 1):
-                idx = j % self.tube_segments
-                angle = 2 * np.pi * idx / self.tube_segments
+            for j in range(tube_segments + 1):
+                idx = j % tube_segments
+                angle = 2 * np.pi * idx / tube_segments
 
                 # Elliptical cross-section
                 cos_a = np.cos(angle)
@@ -418,7 +648,7 @@ class Strand:
 
         glEnd()
 
-    def _draw_chain_end_caps(self, chain, all_points=None, frames=None):
+    def _draw_chain_end_caps(self, chain, all_points=None, frames=None, cap_segments=32):
         """
         Draw end caps only at the true start and end of the chain.
 
@@ -438,21 +668,31 @@ class Strand:
             tangent_len = np.linalg.norm(tangent_start)
             if tangent_len > 1e-6:
                 tangent_start = tangent_start / tangent_len
-            self._draw_ellipsoid_cap_with_frame(first_strand.start, tangent_start, frames[0])
+            self._draw_ellipsoid_cap_with_frame(
+                first_strand.start,
+                tangent_start,
+                frames[0],
+                segments=cap_segments
+            )
 
             # End cap - use tangent from last two points (matches tube end)
             tangent_end = all_points[-1] - all_points[-2]
             tangent_len = np.linalg.norm(tangent_end)
             if tangent_len > 1e-6:
                 tangent_end = tangent_end / tangent_len
-            self._draw_ellipsoid_cap_with_frame(last_strand.end, tangent_end, frames[-1])
+            self._draw_ellipsoid_cap_with_frame(
+                last_strand.end,
+                tangent_end,
+                frames[-1],
+                segments=cap_segments
+            )
         else:
             # Fallback to original behavior if frames not provided
             tangent_start = first_strand.get_bezier_tangent(0.0)
-            self._draw_ellipsoid_cap(first_strand.start, tangent_start)
+            self._draw_ellipsoid_cap(first_strand.start, tangent_start, segments=cap_segments)
 
             tangent_end = last_strand.get_bezier_tangent(1.0)
-            self._draw_ellipsoid_cap(last_strand.end, tangent_end)
+            self._draw_ellipsoid_cap(last_strand.end, tangent_end, segments=cap_segments)
 
     def _draw_tube(self):
         """Draw the strand as a tube along the Bezier curve using parallel transport frame"""
@@ -642,7 +882,7 @@ class Strand:
         self._draw_ellipsoid_cap(self.start, tangent_start)
         self._draw_ellipsoid_cap(self.end, tangent_end)
 
-    def _draw_ellipsoid_cap(self, position, tangent):
+    def _draw_ellipsoid_cap(self, position, tangent, segments=32):
         """Draw an ellipsoid cap at the given position, oriented along tangent"""
         glPushMatrix()
         glTranslatef(*position)
@@ -683,12 +923,12 @@ class Strand:
 
         quadric = gluNewQuadric()
         gluQuadricNormals(quadric, GLU_SMOOTH)  # Smooth normals for proper lighting
-        gluSphere(quadric, 1.0, 16, 16)
+        gluSphere(quadric, 1.0, segments, segments)
         gluDeleteQuadric(quadric)
 
         glPopMatrix()
 
-    def _draw_ellipsoid_cap_with_frame(self, position, tangent, frame):
+    def _draw_ellipsoid_cap_with_frame(self, position, tangent, frame, segments=32):
         """
         Draw an ellipsoid cap using a pre-computed frame for orientation.
 
@@ -731,7 +971,7 @@ class Strand:
 
         quadric = gluNewQuadric()
         gluQuadricNormals(quadric, GLU_SMOOTH)  # Smooth normals for proper lighting
-        gluSphere(quadric, 1.0, 16, 16)
+        gluSphere(quadric, 1.0, segments, segments)
         gluDeleteQuadric(quadric)
 
         glPopMatrix()
@@ -750,7 +990,7 @@ class Strand:
 
         quadric = gluNewQuadric()
         gluQuadricNormals(quadric, GLU_SMOOTH)  # Smooth normals for proper lighting
-        gluSphere(quadric, 1.0, 16, 16)
+        gluSphere(quadric, 1.0, 32, 32)
         gluDeleteQuadric(quadric)
 
         glPopMatrix()
@@ -792,6 +1032,7 @@ class Strand:
         direction = self.end - self.start
         self.control_point1 = self.start + direction * 0.33
         self.control_point2 = self.start + direction * 0.67
+        self._mark_geometry_dirty()
 
     def save_control_points(self):
         """
@@ -826,10 +1067,12 @@ class Strand:
             # Was custom - restore exact positions
             self.control_point1 = saved['cp1'].copy()
             self.control_point2 = saved['cp2'].copy()
+            self._mark_geometry_dirty()
 
     def set_control_point1(self, position):
         """Set the first control point position"""
         self.control_point1 = np.array(position, dtype=float)
+        self._mark_geometry_dirty()
 
         # Sync attached strands at start (attachment_side == 0) for C1 continuity
         for attached in self.attached_strands:
@@ -840,6 +1083,7 @@ class Strand:
     def set_control_point2(self, position):
         """Set the second control point position"""
         self.control_point2 = np.array(position, dtype=float)
+        self._mark_geometry_dirty()
 
         # Sync attached strands at end (attachment_side == 1) for C1 continuity
         for attached in self.attached_strands:
@@ -854,6 +1098,7 @@ class Strand:
 
         # Move control point 1 with start
         self.control_point1 += delta
+        self._mark_geometry_dirty()
 
         # Update attached strands at start (attachment_side == 0)
         for attached in self.attached_strands:
@@ -870,6 +1115,7 @@ class Strand:
 
         # Move control point 2 with end
         self.control_point2 += delta
+        self._mark_geometry_dirty()
 
         # Update attached strands at end (attachment_side == 1)
         for attached in self.attached_strands:
@@ -886,6 +1132,7 @@ class Strand:
         self.end += delta
         self.control_point1 += delta
         self.control_point2 += delta
+        self._mark_geometry_dirty()
 
     # ==================== Serialization ====================
 
@@ -918,6 +1165,7 @@ class Strand:
         strand.control_point2 = np.array(data['control_point2'])
         strand.height_ratio = data.get('height_ratio', 0.4)
         strand.visible = data.get('visible', True)
+        strand._mark_geometry_dirty()
 
         return strand
 

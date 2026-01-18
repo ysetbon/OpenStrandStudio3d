@@ -600,6 +600,7 @@ class MoveModeMixin:
                 # Also move its end and cp2 to maintain shape (whole strand moves)
                 attached.end = attached.end + delta
                 attached.control_point2 = attached.control_point2 + delta
+                attached._mark_geometry_dirty()
 
                 # In straight mode, re-straighten the attached strand
                 if self.straight_segment_mode:

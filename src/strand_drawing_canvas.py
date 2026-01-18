@@ -100,6 +100,27 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self.background_top_color = (0.72, 0.73, 0.75)
         self.background_bottom_color = (0.58, 0.59, 0.61)
 
+        # Adaptive LOD settings (distance -> segments)
+        self.lod_enabled = True
+        self.lod_curve_levels = [
+            (6.0, 56),
+            (12.0, 40),
+            (20.0, 32),
+            (35.0, 24),
+        ]
+        self.lod_tube_levels = [
+            (6.0, 40),
+            (12.0, 32),
+            (20.0, 24),
+            (35.0, 18),
+        ]
+        self.lod_cap_levels = [
+            (6.0, 24),
+            (12.0, 18),
+            (20.0, 14),
+            (35.0, 10),
+        ]
+
         # Enable mouse tracking for hover effects
         self.setMouseTracking(True)
 
@@ -109,6 +130,8 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
     def initializeGL(self):
         """Initialize OpenGL settings"""
         glClearColor(*self.background_color)
+
+        glShadeModel(GL_SMOOTH)
 
         # Enable depth testing
         glEnable(GL_DEPTH_TEST)
@@ -131,6 +154,7 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         glEnable(GL_LIGHT2)
         glEnable(GL_COLOR_MATERIAL)
         glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
+        glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE)
 
         # Normalize normals (important for scaled geometry)
         glEnable(GL_NORMALIZE)
@@ -157,9 +181,9 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         glLightfv(GL_LIGHT2, GL_DIFFUSE, [0.2, 0.2, 0.25, 1.0])   # Subtle blue tint
         glLightfv(GL_LIGHT2, GL_SPECULAR, [0.3, 0.3, 0.35, 1.0])
 
-        # Material properties - plastic leather sheen
-        glMaterialfv(GL_FRONT, GL_SPECULAR, [0.7, 0.7, 0.7, 1.0])  # Brighter specular for plastic look
-        glMaterialf(GL_FRONT, GL_SHININESS, 64.0)  # Higher = tighter, glossier highlights
+        # Material properties - glossy plastic sheen
+        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, [0.9, 0.9, 0.9, 1.0])
+        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 96.0)
 
     def resizeGL(self, width, height):
         """Handle widget resize"""
@@ -378,19 +402,71 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
 
     def _draw_strands(self):
         """Draw all strands in the scene"""
+        camera_pos = self._get_camera_position()
         for strand in self.strands:
             is_selected = (strand == self.selected_strand)
             is_hovered = (strand == self.hovered_strand)
-            strand.draw(is_selected, is_hovered)
+            lod = self._get_lod_for_strand(strand, camera_pos)
+            strand.draw(is_selected, is_hovered, lod=lod)
 
         # Draw selection highlight for selected strand (semi-transparent overlay)
         if self.selected_strand and self.selected_strand.visible:
-            self.selected_strand.draw_selection_highlight()
+            lod = self._get_lod_for_strand(self.selected_strand, camera_pos)
+            self.selected_strand.draw_selection_highlight(lod=lod)
 
         # Draw hover highlight separately (avoid stacking with selection)
         if (self.hovered_strand and self.hovered_strand.visible and
                 self.hovered_strand != self.selected_strand):
-            self.hovered_strand.draw_hover_highlight()
+            lod = self._get_lod_for_strand(self.hovered_strand, camera_pos)
+            self.hovered_strand.draw_hover_highlight(lod=lod)
+
+    def _get_camera_position(self):
+        """Return current camera position in world space."""
+        azimuth_rad = math.radians(self.camera_azimuth)
+        elevation_rad = math.radians(self.camera_elevation)
+
+        camera_x = self.camera_target[0] + self.camera_distance * math.cos(elevation_rad) * math.sin(azimuth_rad)
+        camera_y = self.camera_target[1] + self.camera_distance * math.sin(elevation_rad)
+        camera_z = self.camera_target[2] + self.camera_distance * math.cos(elevation_rad) * math.cos(azimuth_rad)
+
+        return np.array([camera_x, camera_y, camera_z])
+
+    def _pick_lod_value(self, distance, levels, default_value):
+        """Pick the first segment count matching the distance threshold."""
+        for max_dist, value in levels:
+            if distance <= max_dist:
+                return value
+        return default_value
+
+    def _get_lod_for_strand(self, strand, camera_pos):
+        """Compute adaptive LOD segments based on camera distance."""
+        if not self.lod_enabled:
+            return None
+
+        center = (strand.start + strand.end) * 0.5
+        distance = float(np.linalg.norm(camera_pos - center))
+
+        curve_segments = self._pick_lod_value(
+            distance,
+            self.lod_curve_levels,
+            strand.curve_segments
+        )
+        tube_segments = self._pick_lod_value(
+            distance,
+            self.lod_tube_levels,
+            strand.tube_segments
+        )
+        cap_segments = self._pick_lod_value(
+            distance,
+            self.lod_cap_levels,
+            16
+        )
+
+        return {
+            "curve_segments": min(curve_segments, strand.curve_segments),
+            "tube_segments": min(tube_segments, strand.tube_segments),
+            "cap_segments": cap_segments
+        }
 
     def _draw_strand_preview(self):
         """Draw preview while creating a new strand"""

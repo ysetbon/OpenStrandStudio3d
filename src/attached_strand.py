@@ -99,6 +99,7 @@ class AttachedStrand(Strand):
         cp_dist = max(parent_cp_dist, our_length * 0.33)
 
         self.control_point1 = self.start + parent_tangent_dir * cp_dist
+        self._mark_geometry_dirty()
 
     def sync_cp1_with_parent(self):
         """
@@ -133,6 +134,7 @@ class AttachedStrand(Strand):
             # Parent tangent at start = (CP1 - start), should equal -our_tangent
             parent_cp_dist = np.linalg.norm(self.parent_strand.start - self.parent_strand.control_point1)
             self.parent_strand.control_point1 = self.parent_strand.start + our_tangent_dir * parent_cp_dist
+        self.parent_strand._mark_geometry_dirty()
 
     def _get_default_direction(self, parent_strand, attachment_side):
         """Get a default direction for the new strand based on parent's orientation"""
@@ -165,6 +167,7 @@ class AttachedStrand(Strand):
         self.end = self.end + delta
         self.control_point1 = self.control_point1 + delta
         self.control_point2 = self.control_point2 + delta
+        self._mark_geometry_dirty()
 
     def set_end(self, position):
         """
@@ -192,6 +195,7 @@ class AttachedStrand(Strand):
         delta = position - self.end
         self.end = position
         self.control_point2 = self.control_point2 + delta
+        self._mark_geometry_dirty()
 
     def get_angle(self):
         """Get the angle of the strand in 3D (returns direction vector)"""
@@ -280,6 +284,7 @@ class AttachedStrand(Strand):
         # Restore attachment state
         attached.start_attached = data.get('start_attached', True)
         attached.end_attached = data.get('end_attached', False)
+        attached._mark_geometry_dirty()
 
         return attached
 
