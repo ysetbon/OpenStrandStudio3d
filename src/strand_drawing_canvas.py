@@ -59,7 +59,7 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self.moving_control_point = None  # 'start', 'end', 'cp1', 'cp2', or None for whole strand
         self.move_start_pos = None  # 3D position where drag started
         self.hovered_control_point = None  # Which control point is hovered: 'start', 'end', 'cp1', 'cp2'
-        self.control_point_box_size = 0.25  # Size of control point boxes
+        self.control_point_box_size = 0.375  # Size of control point boxes (1.5x)
         self.move_axis_mode = "normal"  # normal (XZ), vertical (Y), depth (camera), along (other point)
 
         # Attach mode state
@@ -992,7 +992,8 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         Other:
         - Delete: Delete selected strand
         - Escape: Cancel/deselect
-        - G: Toggle grid/axes (via toolbar shortcut)
+        - G: Toggle grid (via toolbar shortcut)
+        - A: Toggle axes (via toolbar shortcut)
         - Home: Reset camera
         """
         if event.key() == Qt.Key_Delete:
@@ -1009,7 +1010,7 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                 self.selected_strand = None
                 self.strand_selected.emit("")
 
-        # Note: 'G' key for grid/axes toggle is handled by toolbar action shortcut
+        # Note: 'G' and 'A' keys for grid/axes are handled by toolbar action shortcuts
 
         # Camera view shortcuts
         elif event.key() == Qt.Key_1:
@@ -1154,11 +1155,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             self.strand_deleted.emit(strand_name)
             self.strand_selected.emit("")
 
-    def _get_point_screen_distance(self, point_3d, screen_x, screen_y):
-        """Get screen-space distance from a 3D point to screen coordinates"""
+    def _project_point_to_screen(self, point_3d):
+        """Project a 3D point to screen coordinates (x, y), or None on failure."""
         self.makeCurrent()
 
-        # Setup matrices
         glMatrixMode(GL_PROJECTION)
         glPushMatrix()
         glLoadIdentity()
@@ -1172,7 +1172,6 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         glPushMatrix()
         glLoadIdentity()
 
-        # Setup camera
         azimuth_rad = math.radians(self.camera_azimuth)
         elevation_rad = math.radians(self.camera_elevation)
 
@@ -1186,28 +1185,33 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             0.0, 1.0, 0.0
         )
 
-        viewport = glGetIntegerv(GL_VIEWPORT)
-        modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
-        projection = glGetDoublev(GL_PROJECTION_MATRIX)
-
-        result = float('inf')
+        screen_pos = None
         try:
-            screen_pos = gluProject(point_3d[0], point_3d[1], point_3d[2],
+            viewport = glGetIntegerv(GL_VIEWPORT)
+            modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
+            projection = glGetDoublev(GL_PROJECTION_MATRIX)
+            projected = gluProject(point_3d[0], point_3d[1], point_3d[2],
                                    modelview, projection, viewport)
-            dx = screen_pos[0] - screen_x
-            dy = (viewport[3] - screen_pos[1]) - screen_y
-            result = math.sqrt(dx * dx + dy * dy)
+            screen_pos = (projected[0], (viewport[3] - projected[1]))
         except:
-            pass
+            screen_pos = None
+        finally:
+            glMatrixMode(GL_MODELVIEW)
+            glPopMatrix()
+            glMatrixMode(GL_PROJECTION)
+            glPopMatrix()
+            glMatrixMode(GL_MODELVIEW)
 
-        # Restore matrices
-        glMatrixMode(GL_MODELVIEW)
-        glPopMatrix()
-        glMatrixMode(GL_PROJECTION)
-        glPopMatrix()
-        glMatrixMode(GL_MODELVIEW)
+        return screen_pos
 
-        return result
+    def _get_point_screen_distance(self, point_3d, screen_x, screen_y):
+        """Get screen-space distance from a 3D point to screen coordinates"""
+        screen_pos = self._project_point_to_screen(point_3d)
+        if not screen_pos:
+            return float('inf')
+        dx = screen_pos[0] - screen_x
+        dy = screen_pos[1] - screen_y
+        return math.sqrt(dx * dx + dy * dy)
 
     # ==================== Public Methods ====================
 
@@ -1252,14 +1256,22 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         """Toggle visibility of grid and axes"""
         # Toggle both together
         new_state = not (self.show_grid and self.show_axes)
-        self.show_grid = new_state
-        self.show_axes = new_state
-        self.update()
+        self.set_grid_axes_visible(new_state)
         return new_state
 
     def set_grid_axes_visible(self, visible: bool):
         """Set visibility of grid and axes"""
         self.show_grid = visible
+        self.show_axes = visible
+        self.update()
+
+    def set_grid_visible(self, visible: bool):
+        """Set visibility of grid"""
+        self.show_grid = visible
+        self.update()
+
+    def set_axes_visible(self, visible: bool):
+        """Set visibility of axes"""
         self.show_axes = visible
         self.update()
 

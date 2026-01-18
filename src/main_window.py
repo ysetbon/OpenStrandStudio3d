@@ -140,13 +140,21 @@ class MainWindow(QMainWindow):
         self.action_reset_camera.triggered.connect(self._reset_camera)
         toolbar.addAction(self.action_reset_camera)
 
-        # Toggle grid/axes
-        self.action_toggle_grid = QAction("Grid/Axes", self)
+        # Toggle grid
+        self.action_toggle_grid = QAction("Grid", self)
         self.action_toggle_grid.setCheckable(True)
         self.action_toggle_grid.setChecked(True)
         self.action_toggle_grid.setShortcut("G")
-        self.action_toggle_grid.triggered.connect(self._toggle_grid_axes)
+        self.action_toggle_grid.triggered.connect(self._toggle_grid)
         toolbar.addAction(self.action_toggle_grid)
+
+        # Toggle axes
+        self.action_toggle_axes = QAction("Axes", self)
+        self.action_toggle_axes.setCheckable(True)
+        self.action_toggle_axes.setChecked(True)
+        self.action_toggle_axes.setShortcut("A")
+        self.action_toggle_axes.triggered.connect(self._toggle_axes)
+        toolbar.addAction(self.action_toggle_axes)
 
         # Group actions for exclusive selection
         self.mode_actions = [
@@ -275,10 +283,15 @@ class MainWindow(QMainWindow):
         """Reset the camera to default position"""
         self.canvas.reset_camera()
 
-    def _toggle_grid_axes(self):
-        """Toggle grid and axes visibility"""
+    def _toggle_grid(self):
+        """Toggle grid visibility"""
         visible = self.action_toggle_grid.isChecked()
-        self.canvas.set_grid_axes_visible(visible)
+        self.canvas.set_grid_visible(visible)
+
+    def _toggle_axes(self):
+        """Toggle axes visibility"""
+        visible = self.action_toggle_axes.isChecked()
+        self.canvas.set_axes_visible(visible)
 
     def _toggle_rigid_points(self):
         """Toggle rigid points (start/end spheres) visibility"""

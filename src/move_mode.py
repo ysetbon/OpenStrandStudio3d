@@ -25,8 +25,8 @@ class MoveModeMixin:
 
     # Control point visual settings
     CP_SPHERE_RADIUS = 0.12      # Radius of CP1 sphere
-    CP_CONE_RADIUS = 0.12        # Base radius of CP2 cone
-    CP_CONE_HEIGHT = 0.25        # Height of CP2 cone
+    CP_CONE_RADIUS = 0.12        # Base half-size of CP2 pyramid
+    CP_CONE_HEIGHT = 0.25        # Height of CP2 pyramid
     CP_COLOR = (0.0, 0.85, 0.0)  # Green color for control points
     DASH_RADIUS = 0.03           # Radius of tube dashes
     DASH_LENGTH = 0.15           # Length of each dash segment
@@ -69,8 +69,8 @@ class MoveModeMixin:
         # Draw green sphere at CP1 (near start)
         self._draw_cp_sphere(strand.control_point1)
 
-        # Draw green cone at CP2 (near end), pointing toward end
-        self._draw_cp_cone(strand.control_point2, strand.end)
+        # Draw green pyramid at CP2 (near end), pointing toward end
+        self._draw_cp_pyramid(strand.control_point2, strand.end)
 
         # Draw green tube dashes
         self._draw_tube_dashes(strand.start, strand.control_point1)
@@ -93,10 +93,10 @@ class MoveModeMixin:
 
         glPopMatrix()
 
-    def _draw_cp_cone(self, position, target):
+    def _draw_cp_pyramid(self, position, target):
         """
-        Draw a green cone at the given position for CP2.
-        The cone points toward the target (end point).
+        Draw a green pyramid at the given position for CP2.
+        The pyramid points toward the target (end point).
         """
         glPushMatrix()
         glTranslatef(position[0], position[1], position[2])
@@ -128,13 +128,37 @@ class MoveModeMixin:
 
         glColor3f(*self.CP_COLOR)
 
-        quadric = gluNewQuadric()
-        gluQuadricNormals(quadric, GLU_SMOOTH)
-        # Draw cone pointing in the rotated direction
-        gluCylinder(quadric, self.CP_CONE_RADIUS, 0.0, self.CP_CONE_HEIGHT, 16, 1)
-        # Draw base cap
-        gluDisk(quadric, 0.0, self.CP_CONE_RADIUS, 16, 1)
-        gluDeleteQuadric(quadric)
+        half = self.CP_CONE_RADIUS
+        height = self.CP_CONE_HEIGHT
+        base = [
+            np.array([-half, -half, 0.0]),
+            np.array([half, -half, 0.0]),
+            np.array([half, half, 0.0]),
+            np.array([-half, half, 0.0]),
+        ]
+        tip = np.array([0.0, 0.0, height])
+
+        glBegin(GL_TRIANGLES)
+        for i in range(4):
+            v0 = base[i]
+            v1 = base[(i + 1) % 4]
+            normal = np.cross(v1 - v0, tip - v0)
+            normal_len = np.linalg.norm(normal)
+            if normal_len > 1e-6:
+                normal = normal / normal_len
+            glNormal3f(normal[0], normal[1], normal[2])
+            glVertex3f(v0[0], v0[1], v0[2])
+            glVertex3f(v1[0], v1[1], v1[2])
+            glVertex3f(tip[0], tip[1], tip[2])
+        glEnd()
+
+        glBegin(GL_QUADS)
+        glNormal3f(0.0, 0.0, -1.0)
+        glVertex3f(base[0][0], base[0][1], base[0][2])
+        glVertex3f(base[1][0], base[1][1], base[1][2])
+        glVertex3f(base[2][0], base[2][1], base[2][2])
+        glVertex3f(base[3][0], base[3][1], base[3][2])
+        glEnd()
 
         glPopMatrix()
 
@@ -359,13 +383,39 @@ class MoveModeMixin:
             }
 
         # Screen pixel threshold for hover detection
-        hover_threshold = 25  # pixels
+        min_hover_threshold = 12  # pixels
 
         closest_cp = None
         closest_dist = float('inf')
 
         for cp_name, cp_pos in control_points.items():
-            screen_dist = self._get_point_screen_distance(cp_pos, screen_x, screen_y)
+            screen_center = self._project_point_to_screen(cp_pos)
+            if not screen_center:
+                continue
+
+            box_size = self.control_point_box_size
+            if cp_name in ('cp1', 'cp2'):
+                box_size *= 0.8
+
+            half = box_size / 2.0
+            max_radius = 0.0
+            for sx in (-1.0, 1.0):
+                for sy in (-1.0, 1.0):
+                    for sz in (-1.0, 1.0):
+                        offset = np.array([sx * half, sy * half, sz * half])
+                        screen_offset = self._project_point_to_screen(cp_pos + offset)
+                        if not screen_offset:
+                            continue
+                        dx = screen_offset[0] - screen_center[0]
+                        dy = screen_offset[1] - screen_center[1]
+                        dist = math.sqrt(dx * dx + dy * dy)
+                        if dist > max_radius:
+                            max_radius = dist
+
+            hover_threshold = max(min_hover_threshold, max_radius)
+            dx = screen_center[0] - screen_x
+            dy = screen_center[1] - screen_y
+            screen_dist = math.sqrt(dx * dx + dy * dy)
             if screen_dist < hover_threshold and screen_dist < closest_dist:
                 closest_dist = screen_dist
                 closest_cp = cp_name
