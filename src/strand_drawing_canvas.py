@@ -331,53 +331,64 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         if self.grid_endless:
             view_radius = max(base_half_size, self.camera_distance * 5.0, self.grid_view_radius)
             view_radius = min(view_radius, self.grid_max_view_radius)
-            origin_x = round(self.camera_target[0] / self.grid_spacing) * self.grid_spacing
-            origin_z = round(self.camera_target[2] / self.grid_spacing) * self.grid_spacing
-            max_index = max(1, int(view_radius / self.grid_spacing))
+            view_center_x = self.camera_target[0]
+            view_center_z = self.camera_target[2]
+            min_x = int(math.floor((view_center_x - view_radius) / self.grid_spacing))
+            max_x = int(math.ceil((view_center_x + view_radius) / self.grid_spacing))
+            min_z = int(math.floor((view_center_z - view_radius) / self.grid_spacing))
+            max_z = int(math.ceil((view_center_z + view_radius) / self.grid_spacing))
         else:
             view_radius = base_half_size
-            origin_x = 0.0
-            origin_z = 0.0
+            view_center_x = 0.0
+            view_center_z = 0.0
             max_index = self.grid_size // 2
+            min_x = -max_index
+            max_x = max_index
+            min_z = -max_index
+            max_z = max_index
         major_every = self.grid_major_every if self.grid_major_every > 0 else None
 
         # Minor grid lines
         glLineWidth(1.0)
         glBegin(GL_LINES)
-        for i in range(-max_index, max_index + 1):
+        for i in range(min_z, max_z + 1):
             if major_every and i % major_every == 0:
                 continue
-            pos = i * self.grid_spacing
-            z = origin_z + pos
-            x = origin_x + pos
-            alpha_z = self._grid_alpha(abs(pos), view_radius, 0.08, 0.28)
-            alpha_x = self._grid_alpha(abs(pos), view_radius, 0.08, 0.28)
+            z = i * self.grid_spacing
+            alpha_z = self._grid_alpha(abs(z - view_center_z), view_radius, 0.08, 0.28)
             glColor4f(*self.grid_minor_color, alpha_z)
-            glVertex3f(origin_x - view_radius, 0, z)
-            glVertex3f(origin_x + view_radius, 0, z)
+            glVertex3f(view_center_x - view_radius, 0, z)
+            glVertex3f(view_center_x + view_radius, 0, z)
+        for i in range(min_x, max_x + 1):
+            if major_every and i % major_every == 0:
+                continue
+            x = i * self.grid_spacing
+            alpha_x = self._grid_alpha(abs(x - view_center_x), view_radius, 0.08, 0.28)
             glColor4f(*self.grid_minor_color, alpha_x)
-            glVertex3f(x, 0, origin_z - view_radius)
-            glVertex3f(x, 0, origin_z + view_radius)
+            glVertex3f(x, 0, view_center_z - view_radius)
+            glVertex3f(x, 0, view_center_z + view_radius)
         glEnd()
 
         # Major grid lines
         if major_every:
             glLineWidth(1.5)
             glBegin(GL_LINES)
-            for i in range(-max_index, max_index + 1):
+            for i in range(min_z, max_z + 1):
                 if i % major_every != 0:
                     continue
-                pos = i * self.grid_spacing
-                z = origin_z + pos
-                x = origin_x + pos
-                alpha_z = self._grid_alpha(abs(pos), view_radius, 0.16, 0.5)
-                alpha_x = self._grid_alpha(abs(pos), view_radius, 0.16, 0.5)
+                z = i * self.grid_spacing
+                alpha_z = self._grid_alpha(abs(z - view_center_z), view_radius, 0.16, 0.5)
                 glColor4f(*self.grid_major_color, alpha_z)
-                glVertex3f(origin_x - view_radius, 0, z)
-                glVertex3f(origin_x + view_radius, 0, z)
+                glVertex3f(view_center_x - view_radius, 0, z)
+                glVertex3f(view_center_x + view_radius, 0, z)
+            for i in range(min_x, max_x + 1):
+                if i % major_every != 0:
+                    continue
+                x = i * self.grid_spacing
+                alpha_x = self._grid_alpha(abs(x - view_center_x), view_radius, 0.16, 0.5)
                 glColor4f(*self.grid_major_color, alpha_x)
-                glVertex3f(x, 0, origin_z - view_radius)
-                glVertex3f(x, 0, origin_z + view_radius)
+                glVertex3f(x, 0, view_center_z - view_radius)
+                glVertex3f(x, 0, view_center_z + view_radius)
             glEnd()
             glLineWidth(1.0)
 
