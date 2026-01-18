@@ -44,3 +44,4 @@ openstrand_1_106/
 # Claude
 .claude/
 tmpclaude-*-cwd
+nul

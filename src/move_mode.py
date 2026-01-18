@@ -16,71 +16,242 @@ class MoveModeMixin:
 
     This class should be inherited by StrandDrawingCanvas along with other mixins.
     It provides methods for:
-    - Drawing control point boxes
+    - Drawing control point indicators (sphere for CP1, cone for CP2)
+    - Drawing tube dashes connecting endpoints to control points
     - Hover detection for control points
     - Moving strands and control points
     - Propagating movement to connected strands
     """
 
+    # Control point visual settings
+    CP_SPHERE_RADIUS = 0.12      # Radius of CP1 sphere
+    CP_CONE_RADIUS = 0.12        # Base radius of CP2 cone
+    CP_CONE_HEIGHT = 0.25        # Height of CP2 cone
+    CP_COLOR = (0.0, 0.85, 0.0)  # Green color for control points
+    DASH_RADIUS = 0.03           # Radius of tube dashes
+    DASH_LENGTH = 0.15           # Length of each dash segment
+    DASH_GAP = 0.1               # Gap between dashes
+
     def _draw_control_points(self):
-        """Draw control points for the selected strand"""
-        if self.selected_strand is None:
+        """
+        Draw control points for strands.
+
+        Normal mode: Show CPs for ALL visible strands (green sphere/cone + dashes, no boxes)
+        Move mode: Show CPs only for SELECTED strand (with red/yellow boxes)
+        """
+        if self.current_mode == "move":
+            # Move mode: only selected strand with boxes
+            if self.selected_strand is not None and self.selected_strand.visible:
+                self._draw_strand_control_points(self.selected_strand, show_boxes=True)
+        else:
+            # Normal mode: all visible strands without boxes
+            for strand in self.strands:
+                if strand.visible:
+                    self._draw_strand_control_points(strand, show_boxes=False)
+
+    def _draw_strand_control_points(self, strand, show_boxes=False):
+        """
+        Draw control points for a single strand.
+
+        Args:
+            strand: The strand to draw control points for
+            show_boxes: If True, draw selection boxes (for move mode)
+        """
+        # Skip if in straight segment mode (no control points to show)
+        if self.straight_segment_mode:
+            if show_boxes:
+                # Still show start/end boxes in move mode even for straight segments
+                self._draw_move_mode_boxes(strand, straight_mode=True)
             return
 
-        # Only draw control point boxes in move mode
-        if self.current_mode != "move":
+        glEnable(GL_LIGHTING)
+
+        # Draw green sphere at CP1 (near start)
+        self._draw_cp_sphere(strand.control_point1)
+
+        # Draw green cone at CP2 (near end), pointing toward end
+        self._draw_cp_cone(strand.control_point2, strand.end)
+
+        # Draw green tube dashes
+        self._draw_tube_dashes(strand.start, strand.control_point1)
+        self._draw_tube_dashes(strand.end, strand.control_point2)
+
+        # Draw selection boxes in move mode
+        if show_boxes:
+            self._draw_move_mode_boxes(strand, straight_mode=False)
+
+    def _draw_cp_sphere(self, position):
+        """Draw a green sphere at the given position for CP1"""
+        glPushMatrix()
+        glTranslatef(position[0], position[1], position[2])
+        glColor3f(*self.CP_COLOR)
+
+        quadric = gluNewQuadric()
+        gluQuadricNormals(quadric, GLU_SMOOTH)
+        gluSphere(quadric, self.CP_SPHERE_RADIUS, 16, 16)
+        gluDeleteQuadric(quadric)
+
+        glPopMatrix()
+
+    def _draw_cp_cone(self, position, target):
+        """
+        Draw a green cone at the given position for CP2.
+        The cone points toward the target (end point).
+        """
+        glPushMatrix()
+        glTranslatef(position[0], position[1], position[2])
+
+        # Calculate rotation to point cone toward target
+        direction = np.array(target) - np.array(position)
+        length = np.linalg.norm(direction)
+
+        if length > 1e-6:
+            direction = direction / length
+
+            # Default cone points along +Z, we need to rotate to point at target
+            # Calculate rotation axis and angle
+            z_axis = np.array([0.0, 0.0, 1.0])
+            dot = np.dot(z_axis, direction)
+            dot = max(-1.0, min(1.0, dot))  # Clamp for numerical stability
+
+            if dot < -0.9999:
+                # Nearly opposite direction - rotate 180 around any perpendicular axis
+                glRotatef(180.0, 1.0, 0.0, 0.0)
+            elif dot < 0.9999:
+                # Calculate rotation axis and angle
+                axis = np.cross(z_axis, direction)
+                axis_len = np.linalg.norm(axis)
+                if axis_len > 1e-6:
+                    axis = axis / axis_len
+                    angle = math.degrees(math.acos(dot))
+                    glRotatef(angle, axis[0], axis[1], axis[2])
+
+        glColor3f(*self.CP_COLOR)
+
+        quadric = gluNewQuadric()
+        gluQuadricNormals(quadric, GLU_SMOOTH)
+        # Draw cone pointing in the rotated direction
+        gluCylinder(quadric, self.CP_CONE_RADIUS, 0.0, self.CP_CONE_HEIGHT, 16, 1)
+        # Draw base cap
+        gluDisk(quadric, 0.0, self.CP_CONE_RADIUS, 16, 1)
+        gluDeleteQuadric(quadric)
+
+        glPopMatrix()
+
+    def _draw_tube_dashes(self, start_pos, end_pos):
+        """
+        Draw green tube dashes between two points.
+        Uses small cylinders with gaps to create dashed line effect.
+        """
+        start = np.array(start_pos)
+        end = np.array(end_pos)
+        direction = end - start
+        total_length = np.linalg.norm(direction)
+
+        if total_length < 1e-6:
             return
 
-        strand = self.selected_strand
-        box_size = self.control_point_box_size
+        direction = direction / total_length
 
+        # Calculate rotation to align cylinder with direction
+        z_axis = np.array([0.0, 0.0, 1.0])
+        dot = np.dot(z_axis, direction)
+        dot = max(-1.0, min(1.0, dot))
+
+        # Prepare rotation
+        rotation_angle = 0.0
+        rotation_axis = np.array([1.0, 0.0, 0.0])
+
+        if dot < -0.9999:
+            rotation_angle = 180.0
+            rotation_axis = np.array([1.0, 0.0, 0.0])
+        elif dot < 0.9999:
+            axis = np.cross(z_axis, direction)
+            axis_len = np.linalg.norm(axis)
+            if axis_len > 1e-6:
+                rotation_axis = axis / axis_len
+                rotation_angle = math.degrees(math.acos(dot))
+
+        # Draw dashes along the line
+        current_dist = 0.0
+        dash_on = True
+
+        glColor3f(*self.CP_COLOR)
+
+        quadric = gluNewQuadric()
+        gluQuadricNormals(quadric, GLU_SMOOTH)
+
+        while current_dist < total_length:
+            if dash_on:
+                # Calculate dash length (may be shorter at end)
+                dash_len = min(self.DASH_LENGTH, total_length - current_dist)
+
+                # Position for this dash
+                dash_start = start + direction * current_dist
+
+                glPushMatrix()
+                glTranslatef(dash_start[0], dash_start[1], dash_start[2])
+
+                if abs(rotation_angle) > 0.01:
+                    glRotatef(rotation_angle, rotation_axis[0], rotation_axis[1], rotation_axis[2])
+
+                gluCylinder(quadric, self.DASH_RADIUS, self.DASH_RADIUS, dash_len, 8, 1)
+                glPopMatrix()
+
+                current_dist += self.DASH_LENGTH
+            else:
+                current_dist += self.DASH_GAP
+
+            dash_on = not dash_on
+
+        gluDeleteQuadric(quadric)
+
+    def _draw_move_mode_boxes(self, strand, straight_mode=False):
+        """
+        Draw selection boxes for move mode.
+
+        Colors:
+        - Red semi-transparent: idle (not hovering, not dragging)
+        - Yellow semi-transparent: hovering or dragging
+        """
         glDisable(GL_LIGHTING)
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
-        # Draw lines from endpoints to control points (only if NOT in straight mode)
-        if not self.straight_segment_mode:
-            glColor4f(0.5, 0.5, 0.5, 0.8)
-            glLineWidth(2.0)
-            glBegin(GL_LINES)
+        box_size = self.control_point_box_size
+        is_dragging = self.moving_strand is not None
 
-            # Start to control point 1
-            glVertex3f(*strand.start)
-            glVertex3f(*strand.control_point1)
+        # Define colors
+        RED_IDLE = (0.9, 0.2, 0.2, 0.4)      # Semi-transparent red
+        YELLOW_ACTIVE = (1.0, 1.0, 0.0, 0.5)  # Semi-transparent yellow
 
-            # End to control point 2
-            glVertex3f(*strand.end)
-            glVertex3f(*strand.control_point2)
-
-            glEnd()
-            glLineWidth(1.0)
-
-        # Draw control point boxes
-        # Start point - Green (or yellow if hovered)
-        if self.hovered_control_point == 'start':
-            self._draw_box(strand.start, box_size, (1.0, 1.0, 0.0, 0.6))  # Yellow semi-transparent
+        # Start point box
+        if self.hovered_control_point == 'start' or (is_dragging and self.moving_control_point == 'start'):
+            self._draw_box(strand.start, box_size, YELLOW_ACTIVE)
         else:
-            self._draw_box(strand.start, box_size, (0.0, 0.9, 0.0, 0.8))  # Green
+            self._draw_box(strand.start, box_size, RED_IDLE)
 
-        # End point - Red (or yellow if hovered)
-        if self.hovered_control_point == 'end':
-            self._draw_box(strand.end, box_size, (1.0, 1.0, 0.0, 0.6))  # Yellow semi-transparent
+        # End point box
+        if self.hovered_control_point == 'end' or (is_dragging and self.moving_control_point == 'end'):
+            self._draw_box(strand.end, box_size, YELLOW_ACTIVE)
         else:
-            self._draw_box(strand.end, box_size, (0.9, 0.0, 0.0, 0.8))  # Red
+            self._draw_box(strand.end, box_size, RED_IDLE)
 
-        # Control point boxes only shown if NOT in straight mode
-        if not self.straight_segment_mode:
-            # Control point 1 - Cyan (or yellow if hovered)
-            if self.hovered_control_point == 'cp1':
-                self._draw_box(strand.control_point1, box_size * 0.8, (1.0, 1.0, 0.0, 0.6))
-            else:
-                self._draw_box(strand.control_point1, box_size * 0.8, (0.0, 0.9, 0.9, 0.8))  # Cyan
+        # Control point boxes (only if NOT in straight mode)
+        if not straight_mode:
+            cp_box_size = box_size * 0.8
 
-            # Control point 2 - Magenta (or yellow if hovered)
-            if self.hovered_control_point == 'cp2':
-                self._draw_box(strand.control_point2, box_size * 0.8, (1.0, 1.0, 0.0, 0.6))
+            # CP1 box
+            if self.hovered_control_point == 'cp1' or (is_dragging and self.moving_control_point == 'cp1'):
+                self._draw_box(strand.control_point1, cp_box_size, YELLOW_ACTIVE)
             else:
-                self._draw_box(strand.control_point2, box_size * 0.8, (0.9, 0.0, 0.9, 0.8))  # Magenta
+                self._draw_box(strand.control_point1, cp_box_size, RED_IDLE)
+
+            # CP2 box
+            if self.hovered_control_point == 'cp2' or (is_dragging and self.moving_control_point == 'cp2'):
+                self._draw_box(strand.control_point2, cp_box_size, YELLOW_ACTIVE)
+            else:
+                self._draw_box(strand.control_point2, cp_box_size, RED_IDLE)
 
         glDisable(GL_BLEND)
         glEnable(GL_LIGHTING)

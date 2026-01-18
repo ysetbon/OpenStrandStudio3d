@@ -1,15 +1,123 @@
 """
 OpenStrandStudio 3D - Layer Panel
-UI panel for managing strand layers (no hierarchy in 3D)
+UI panel for managing strand layers with collapsible set groups
 """
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
     QPushButton, QLabel, QFrame, QColorDialog, QMenu,
-    QWidgetAction
+    QWidgetAction, QSizePolicy
 )
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QColor, QPalette
+
+
+class SetGroupHeader(QPushButton):
+    """Collapsible header for a set group"""
+
+    toggled_collapse = pyqtSignal(bool)  # True = collapsed
+
+    def __init__(self, set_number: str, parent=None):
+        super().__init__(parent)
+        self.set_number = set_number
+        self.is_collapsed = False
+        self.strand_count = 0
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setFixedHeight(32)
+        self.setCursor(Qt.PointingHandCursor)
+        self.clicked.connect(self._toggle)
+        self._update_style()
+
+    def _update_style(self):
+        arrow = "▼" if not self.is_collapsed else "▶"
+        count_text = f"({self.strand_count})" if self.strand_count > 0 else ""
+        self.setText(f"  {arrow}  {self.set_number}  {count_text}")
+
+        self.setStyleSheet("""
+            QPushButton {
+                background-color: #3a3a3a;
+                border: none;
+                border-radius: 4px;
+                color: white;
+                text-align: left;
+                padding-left: 5px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #4a4a4a;
+            }
+            QPushButton:pressed {
+                background-color: #2a2a2a;
+            }
+        """)
+
+    def _toggle(self):
+        self.is_collapsed = not self.is_collapsed
+        self._update_style()
+        self.toggled_collapse.emit(self.is_collapsed)
+
+    def set_collapsed(self, collapsed: bool):
+        self.is_collapsed = collapsed
+        self._update_style()
+
+    def update_count(self, count: int):
+        self.strand_count = count
+        self._update_style()
+
+
+class SetGroup(QWidget):
+    """A collapsible group containing strands from the same set"""
+
+    def __init__(self, set_number: str, parent=None):
+        super().__init__(parent)
+        self.set_number = set_number
+        self.strand_buttons = {}  # name -> LayerButton
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        # Header
+        self.header = SetGroupHeader(self.set_number)
+        self.header.toggled_collapse.connect(self._on_toggle)
+        layout.addWidget(self.header)
+
+        # Container for strand buttons
+        self.content_widget = QWidget()
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(15, 2, 0, 5)  # Indent children
+        self.content_layout.setSpacing(3)
+        layout.addWidget(self.content_widget)
+
+    def _on_toggle(self, collapsed: bool):
+        self.content_widget.setVisible(not collapsed)
+
+    def add_strand_button(self, button):
+        """Add a strand button to this group"""
+        self.strand_buttons[button.strand_name] = button
+        self.content_layout.addWidget(button)
+        self.header.update_count(len(self.strand_buttons))
+
+    def remove_strand_button(self, name: str):
+        """Remove a strand button from this group"""
+        if name in self.strand_buttons:
+            button = self.strand_buttons.pop(name)
+            self.content_layout.removeWidget(button)
+            button.deleteLater()
+            self.header.update_count(len(self.strand_buttons))
+
+    def is_empty(self):
+        return len(self.strand_buttons) == 0
+
+    def get_button(self, name: str):
+        return self.strand_buttons.get(name)
 
 
 class HoverLabel(QLabel):
@@ -236,7 +344,7 @@ class LayerButton(QPushButton):
 
 
 class LayerPanel(QWidget):
-    """Panel displaying all strand layers"""
+    """Panel displaying all strand layers organized by sets"""
 
     strand_selected = pyqtSignal(str)           # strand name
     strand_visibility_changed = pyqtSignal(str, bool)  # name, visible
@@ -248,6 +356,7 @@ class LayerPanel(QWidget):
         super().__init__(parent)
 
         self.layer_buttons = {}  # name -> LayerButton
+        self.set_groups = {}     # set_number -> SetGroup
         self.selected_strand = None
 
         self._setup_ui()
@@ -346,33 +455,79 @@ class LayerPanel(QWidget):
         """)
 
     def add_strand(self, name: str, color=(0.9, 0.5, 0.1)):
-        """Add a new strand layer button"""
+        """Add a new strand layer button to appropriate set group"""
         if name in self.layer_buttons:
             return
 
         # Hide info label when we have strands
         self.info_label.hide()
 
+        # Get set number from name
+        set_number = self._get_set_number(name)
+        if set_number is None:
+            set_number = "0"  # Fallback
+
+        # Create or get the set group
+        if set_number not in self.set_groups:
+            group = SetGroup(set_number)
+            self.set_groups[set_number] = group
+            # Insert group in sorted order (before stretch)
+            self._insert_group_sorted(group)
+
         # Create button
         button = LayerButton(name, color)
         button.clicked.connect(lambda checked, n=name: self._on_button_clicked(n))
         button.visibility_changed.connect(self.strand_visibility_changed.emit)
-        # Connect color change to our handler that propagates to all strands in set
         button.color_changed.connect(self._on_strand_color_changed)
 
         self.layer_buttons[name] = button
 
-        # Insert before stretch
-        self.layers_layout.insertWidget(self.layers_layout.count() - 1, button)
+        # Add to set group
+        self.set_groups[set_number].add_strand_button(button)
+
+    def _insert_group_sorted(self, group: SetGroup):
+        """Insert a set group in numerically sorted order"""
+        try:
+            new_num = int(group.set_number)
+        except ValueError:
+            new_num = 0
+
+        # Find the right position
+        insert_idx = 0
+        for i in range(self.layers_layout.count() - 1):  # -1 for stretch
+            widget = self.layers_layout.itemAt(i).widget()
+            if isinstance(widget, SetGroup):
+                try:
+                    existing_num = int(widget.set_number)
+                except ValueError:
+                    existing_num = 0
+                if new_num > existing_num:
+                    insert_idx = i + 1
+                else:
+                    break
+
+        self.layers_layout.insertWidget(insert_idx, group)
 
     def remove_strand(self, name: str):
         """Remove a strand layer button"""
         if name not in self.layer_buttons:
             return
 
-        button = self.layer_buttons.pop(name)
-        self.layers_layout.removeWidget(button)
-        button.deleteLater()
+        # Get set number and remove from group
+        set_number = self._get_set_number(name)
+        if set_number and set_number in self.set_groups:
+            group = self.set_groups[set_number]
+            group.remove_strand_button(name)
+
+            # Remove empty groups
+            if group.is_empty():
+                self.layers_layout.removeWidget(group)
+                group.deleteLater()
+                del self.set_groups[set_number]
+
+        # Remove from layer_buttons dict
+        if name in self.layer_buttons:
+            del self.layer_buttons[name]
 
         # Show info label if no strands
         if not self.layer_buttons:
@@ -479,9 +634,19 @@ class LayerPanel(QWidget):
                     self.strand_color_changed.emit(name, color)
 
     def clear(self):
-        """Remove all layer buttons"""
-        for name in list(self.layer_buttons.keys()):
-            self.remove_strand(name)
+        """Remove all layer buttons and set groups"""
+        # Remove all set groups
+        for set_number in list(self.set_groups.keys()):
+            group = self.set_groups.pop(set_number)
+            self.layers_layout.removeWidget(group)
+            group.deleteLater()
+
+        # Clear layer buttons dict
+        self.layer_buttons.clear()
+        self.selected_strand = None
+
+        # Show info label
+        self.info_label.show()
 
     def get_strand_count(self):
         """Get number of strands"""

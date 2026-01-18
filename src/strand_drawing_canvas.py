@@ -201,9 +201,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         if self.creating_strand and self.new_strand_start is not None:
             self._draw_strand_preview()
 
-        # Draw control points for selected strand (from MoveModeMixin)
-        if self.selected_strand is not None:
-            self._draw_control_points()
+        # Draw control points (from MoveModeMixin)
+        # Normal mode: shows CPs for all visible strands
+        # Move mode: shows CPs only for selected strand with boxes
+        self._draw_control_points()
 
         # Draw attachment points in attach mode (from AttachModeMixin)
         if self.current_mode == "attach":
