@@ -137,6 +137,9 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             (35.0, 10),
         ]
 
+        # Undo/Redo manager (set by MainWindow after initialization)
+        self.undo_redo_manager = None
+
         # Enable mouse tracking for hover effects
         self.setMouseTracking(True)
 
@@ -1097,6 +1100,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             print(f"Strand too short: {length:.2f} - need at least 0.3")
             return
 
+        # Save state for undo BEFORE creating the strand
+        if hasattr(self, 'undo_redo_manager') and self.undo_redo_manager:
+            self.undo_redo_manager.save_state()
+
         # Generate strand name
         set_number = self._get_next_set_number()
         strand_name = f"{set_number}_1"
@@ -1139,9 +1146,116 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
 
         return max_set + 1
 
+    def duplicate_set(self, set_number):
+        """Duplicate all strands in a set and return the new set number and names."""
+        from strand import Strand
+        from attached_strand import AttachedStrand
+
+        set_number_str = str(set_number)
+        set_prefix = f"{set_number_str}_"
+        original_strands = [s for s in self.strands if s.name.startswith(set_prefix)]
+
+        if not original_strands:
+            return None
+
+        # Save state for undo before duplication
+        if hasattr(self, 'undo_redo_manager') and self.undo_redo_manager:
+            self.undo_redo_manager.save_state()
+
+        new_set_number = self._get_next_set_number()
+
+        def make_duplicate_name(name):
+            parts = name.split('_', 1)
+            if len(parts) == 2:
+                return f"{new_set_number}_{parts[1]}"
+            return f"{new_set_number}_{name}"
+
+        base_strands = [s for s in original_strands if not isinstance(s, AttachedStrand)]
+        attached_strands = [s for s in original_strands if isinstance(s, AttachedStrand)]
+
+        name_map = {}
+        new_names = []
+
+        for strand in base_strands:
+            new_name = make_duplicate_name(strand.name)
+            new_strand = Strand(
+                start=strand.start.copy(),
+                end=strand.end.copy(),
+                name=new_name,
+                color=strand.color,
+                width=strand.width
+            )
+            new_strand.control_point1 = strand.control_point1.copy()
+            new_strand.control_point2 = strand.control_point2.copy()
+            new_strand.color = strand.color
+            new_strand.width = strand.width
+            new_strand.height_ratio = strand.height_ratio
+            new_strand.visible = strand.visible
+            new_strand.tube_segments = strand.tube_segments
+            new_strand.curve_segments = strand.curve_segments
+            new_strand._mark_geometry_dirty()
+
+            if self.straight_segment_mode:
+                saved = self.saved_control_points.get(id(strand))
+                if saved:
+                    self.saved_control_points[id(new_strand)] = {
+                        'cp1': saved['cp1'].copy(),
+                        'cp2': saved['cp2'].copy(),
+                        'is_default': saved.get('is_default', False)
+                    }
+
+            self.strands.append(new_strand)
+            name_map[strand.name] = new_strand
+            new_names.append(new_name)
+
+        for strand in self._sort_attached_strands(attached_strands):
+            parent = strand.parent_strand
+            new_parent = name_map.get(parent.name)
+            if new_parent is None:
+                continue
+
+            new_name = make_duplicate_name(strand.name)
+            new_strand = AttachedStrand(
+                parent_strand=new_parent,
+                attachment_side=strand.attachment_side,
+                end_position=strand.end.copy(),
+                name=new_name
+            )
+            new_strand.control_point1 = strand.control_point1.copy()
+            new_strand.control_point2 = strand.control_point2.copy()
+            new_strand.color = strand.color
+            new_strand.width = strand.width
+            new_strand.height_ratio = strand.height_ratio
+            new_strand.visible = strand.visible
+            new_strand.tube_segments = strand.tube_segments
+            new_strand.curve_segments = strand.curve_segments
+            new_strand.start_attached = getattr(strand, "start_attached", True)
+            new_strand.end_attached = getattr(strand, "end_attached", False)
+            new_strand._mark_geometry_dirty()
+
+            if self.straight_segment_mode:
+                saved = self.saved_control_points.get(id(strand))
+                if saved:
+                    self.saved_control_points[id(new_strand)] = {
+                        'cp1': saved['cp1'].copy(),
+                        'cp2': saved['cp2'].copy(),
+                        'is_default': saved.get('is_default', False)
+                    }
+
+            self.strands.append(new_strand)
+            name_map[strand.name] = new_strand
+            new_names.append(new_name)
+
+        self.update()
+        return new_set_number, new_names
+
     def _delete_selected_strand(self):
         """Delete the currently selected strand"""
         if self.selected_strand:
+            # Save state for undo before deletion
+            if hasattr(self, 'undo_redo_manager') and self.undo_redo_manager:
+                self.undo_redo_manager.save_state()
+
             strand_name = self.selected_strand.name
 
             # Clean up saved control points if in straight mode
@@ -1339,6 +1453,9 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         """Set visibility of a strand"""
         for strand in self.strands:
             if strand.name == name:
+                # Save state for undo
+                if hasattr(self, 'undo_redo_manager') and self.undo_redo_manager:
+                    self.undo_redo_manager.save_state()
                 strand.visible = visible
                 self.update()
                 return
@@ -1347,6 +1464,9 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         """Set color of a strand"""
         for strand in self.strands:
             if strand.name == name:
+                # Save state for undo
+                if hasattr(self, 'undo_redo_manager') and self.undo_redo_manager:
+                    self.undo_redo_manager.save_state()
                 strand.color = color
                 self.update()
                 return

@@ -101,40 +101,59 @@ class AttachedStrand(Strand):
         self.control_point1 = self.start + parent_tangent_dir * cp_dist
         self._mark_geometry_dirty()
 
-    def sync_cp1_with_parent(self):
+    def sync_cp1_with_parent(self, parent_delta=None):
         """
         Synchronize our CP1 with parent's control point to maintain C1 continuity.
         Call this when parent's CP2 (or CP1 for start attachment) changes.
-        """
-        self._align_cp1_with_parent()
 
-    def sync_parent_cp_with_our_cp1(self):
+        Args:
+            parent_delta: If provided, mirror this movement (move CP1 by -delta).
+                         If None, recalculate CP1 position (used for initial alignment).
+        """
+        if parent_delta is not None:
+            # Mirror the movement: parent CP moved by delta, we move by -delta
+            # This keeps both CPs on the same line through attachment point
+            self.control_point1 = self.control_point1 - parent_delta
+            self._mark_geometry_dirty()
+        else:
+            # Initial alignment or reset
+            self._align_cp1_with_parent()
+
+    def sync_parent_cp_with_our_cp1(self, our_delta=None):
         """
         Synchronize parent's control point with our CP1 to maintain C1 continuity.
         Call this when our CP1 changes.
+
+        Args:
+            our_delta: If provided, mirror this movement to parent's CP (move by -delta).
+                      If None, recalculate parent's CP position.
         """
-        # Our tangent at start = (control_point1 - start)
-        our_tangent_dir = self.control_point1 - self.start
-        tangent_len = np.linalg.norm(our_tangent_dir)
-        if tangent_len < 1e-6:
-            return
-
-        our_tangent_dir = our_tangent_dir / tangent_len
-
-        if self.attachment_side == 1:
-            # Attached to parent's end
-            # Parent's CP2 should be on opposite side of connection point
-            # Parent tangent at end = (end - CP2), should equal our tangent at start
-            # So: CP2 = end - tangent_dir * distance
-            parent_cp_dist = np.linalg.norm(self.parent_strand.end - self.parent_strand.control_point2)
-            self.parent_strand.control_point2 = self.parent_strand.end - our_tangent_dir * parent_cp_dist
+        if our_delta is not None:
+            # Mirror the movement: our CP1 moved by delta, parent's CP moves by -delta
+            # This keeps both CPs on the same line through attachment point
+            if self.attachment_side == 1:
+                # Attached to parent's end, so sync with parent's CP2
+                self.parent_strand.control_point2 = self.parent_strand.control_point2 - our_delta
+            else:
+                # Attached to parent's start, so sync with parent's CP1
+                self.parent_strand.control_point1 = self.parent_strand.control_point1 - our_delta
+            self.parent_strand._mark_geometry_dirty()
         else:
-            # Attached to parent's start
-            # Parent's CP1 should be on opposite side
-            # Parent tangent at start = (CP1 - start), should equal -our_tangent
-            parent_cp_dist = np.linalg.norm(self.parent_strand.start - self.parent_strand.control_point1)
-            self.parent_strand.control_point1 = self.parent_strand.start + our_tangent_dir * parent_cp_dist
-        self.parent_strand._mark_geometry_dirty()
+            # Fallback: recalculate based on tangent direction
+            our_tangent_dir = self.control_point1 - self.start
+            tangent_len = np.linalg.norm(our_tangent_dir)
+            if tangent_len < 1e-6:
+                return
+
+            our_tangent_dir = our_tangent_dir / tangent_len
+
+            if self.attachment_side == 1:
+                parent_cp_dist = np.linalg.norm(self.parent_strand.end - self.parent_strand.control_point2)
+                self.parent_strand.control_point2 = self.parent_strand.end - our_tangent_dir * parent_cp_dist
+            else:
+                parent_cp_dist = np.linalg.norm(self.parent_strand.start - self.parent_strand.control_point1)
+                self.parent_strand.control_point1 = self.parent_strand.start + our_tangent_dir * parent_cp_dist
+            self.parent_strand._mark_geometry_dirty()
 
     def _get_default_direction(self, parent_strand, attachment_side):
         """Get a default direction for the new strand based on parent's orientation"""

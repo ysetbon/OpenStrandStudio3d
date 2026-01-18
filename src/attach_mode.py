@@ -216,6 +216,10 @@ class AttachModeMixin:
             self.hovered_attach_point = None
             return
 
+        # Save state for undo BEFORE starting the attach
+        if hasattr(self, 'undo_redo_manager') and self.undo_redo_manager:
+            self.undo_redo_manager.save_state()
+
         # Get attachment point position
         if side == 0:
             attach_pos = parent_strand.start.copy()

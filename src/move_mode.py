@@ -456,6 +456,10 @@ class MoveModeMixin:
         # Get 3D position at the control point's Y level
         pos_3d = self._screen_to_ground(screen_x, screen_y, ground_y=cp_pos[1])
         if pos_3d:
+            # Save state for undo BEFORE starting the move
+            if hasattr(self, 'undo_redo_manager') and self.undo_redo_manager:
+                self.undo_redo_manager.save_state()
+
             self.moving_strand = strand
             self.moving_control_point = self.hovered_control_point
             self.move_start_pos = np.array(pos_3d)
@@ -568,13 +572,26 @@ class MoveModeMixin:
                 strand.make_straight()
         elif self.moving_control_point == 'cp1':
             # Use setter to trigger C1 continuity sync with parent and children
-            strand.set_control_point1(strand.control_point1 + delta)
-            # If this is an AttachedStrand, also sync parent's control point
+            strand.set_control_point1(strand.control_point1 + delta, delta=delta)
+            # If this is an AttachedStrand, also sync parent's control point (mirror movement)
             if hasattr(strand, 'sync_parent_cp_with_our_cp1'):
-                strand.sync_parent_cp_with_our_cp1()
+                strand.sync_parent_cp_with_our_cp1(delta)
+                # Add parent to LOD targets so it renders with updated geometry
+                if hasattr(strand, 'parent_strand') and hasattr(self, "_add_drag_lod_target"):
+                    self._add_drag_lod_target(strand.parent_strand)
+            # Also add any attached strands at start (side=0) to LOD targets
+            for attached in strand.attached_strands:
+                if hasattr(attached, 'attachment_side') and attached.attachment_side == 0:
+                    if hasattr(self, "_add_drag_lod_target"):
+                        self._add_drag_lod_target(attached)
         elif self.moving_control_point == 'cp2':
-            # Use setter to trigger C1 continuity sync with attached strands
-            strand.set_control_point2(strand.control_point2 + delta)
+            # Use setter to trigger C1 continuity sync with attached strands (mirror movement)
+            strand.set_control_point2(strand.control_point2 + delta, delta=delta)
+            # Add attached strands at end (side=1) to LOD targets so they render with updated geometry
+            for attached in strand.attached_strands:
+                if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
+                    if hasattr(self, "_add_drag_lod_target"):
+                        self._add_drag_lod_target(attached)
         else:
             # Move whole strand
             strand.move(delta)

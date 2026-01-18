@@ -14,6 +14,7 @@ from PyQt5.QtGui import QIcon
 
 from strand_drawing_canvas import StrandDrawingCanvas
 from layer_panel import LayerPanel
+from undo_redo_manager import UndoRedoManager
 
 
 class MainWindow(QMainWindow):
@@ -27,8 +28,10 @@ class MainWindow(QMainWindow):
         # Initialize components
         self.canvas = None
         self.layer_panel = None
+        self.undo_redo_manager = None
 
         self._setup_ui()
+        self._setup_undo_redo()
         self._setup_toolbar()
         self._setup_statusbar()
         self._connect_signals()
@@ -60,6 +63,18 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(splitter)
 
+    def _setup_undo_redo(self):
+        """Setup the undo/redo manager after canvas is created"""
+        self.undo_redo_manager = UndoRedoManager(self.canvas)
+
+        # Connect undo/redo signals
+        self.undo_redo_manager.state_changed.connect(self._update_undo_redo_actions)
+        self.undo_redo_manager.undo_performed.connect(self._on_undo_performed)
+        self.undo_redo_manager.redo_performed.connect(self._on_redo_performed)
+
+        # Store reference on canvas for easy access from canvas operations
+        self.canvas.undo_redo_manager = self.undo_redo_manager
+
     def _setup_toolbar(self):
         """Setup the main toolbar"""
         toolbar = QToolBar("Main Toolbar")
@@ -86,6 +101,21 @@ class MainWindow(QMainWindow):
         self.action_clear_all = QAction("Clear All", self)
         self.action_clear_all.triggered.connect(self._clear_all_strands)
         toolbar.addAction(self.action_clear_all)
+
+        toolbar.addSeparator()
+
+        # === Undo/Redo ===
+        self.action_undo = QAction("Undo", self)
+        self.action_undo.setShortcut("Ctrl+Z")
+        self.action_undo.triggered.connect(self._undo)
+        self.action_undo.setEnabled(False)
+        toolbar.addAction(self.action_undo)
+
+        self.action_redo = QAction("Redo", self)
+        self.action_redo.setShortcut("Ctrl+Y")
+        self.action_redo.triggered.connect(self._redo)
+        self.action_redo.setEnabled(False)
+        toolbar.addAction(self.action_redo)
 
         toolbar.addSeparator()
 
@@ -260,6 +290,7 @@ class MainWindow(QMainWindow):
         self.layer_panel.strand_selected.connect(self.canvas.select_strand_by_name)
         self.layer_panel.strand_visibility_changed.connect(self.canvas.set_strand_visibility)
         self.layer_panel.strand_color_changed.connect(self.canvas.set_strand_color)
+        self.layer_panel.set_duplicate_requested.connect(self._on_set_duplicate_requested)
         self.layer_panel.deselect_all_requested.connect(self.canvas.deselect_all)
 
     def _set_mode(self, mode: str):
@@ -356,6 +387,58 @@ class MainWindow(QMainWindow):
         if strand_name:
             self.statusbar.showMessage(f"Selected: {strand_name}", 2000)
 
+    def _on_set_duplicate_requested(self, set_number: str):
+        """Handle duplication of a full strand set from the layer panel."""
+        result = self.canvas.duplicate_set(set_number)
+        if not result:
+            return
+
+        new_set_number, new_names = result
+        for name in new_names:
+            self.layer_panel.add_strand(name)
+
+        self.statusbar.showMessage(
+            f"Duplicated set {set_number} -> {new_set_number}",
+            3000
+        )
+
+    # ==================== Undo/Redo ====================
+
+    def _undo(self):
+        """Perform undo operation"""
+        if self.undo_redo_manager.undo():
+            self.statusbar.showMessage("Undo", 1500)
+
+    def _redo(self):
+        """Perform redo operation"""
+        if self.undo_redo_manager.redo():
+            self.statusbar.showMessage("Redo", 1500)
+
+    def _update_undo_redo_actions(self):
+        """Update undo/redo action enabled states"""
+        self.action_undo.setEnabled(self.undo_redo_manager.can_undo())
+        self.action_redo.setEnabled(self.undo_redo_manager.can_redo())
+
+    def _on_undo_performed(self):
+        """Handle undo completion - sync layer panel"""
+        self.layer_panel.clear()
+        for strand in self.canvas.strands:
+            self.layer_panel.add_strand(strand.name)
+
+        # Update selection in layer panel
+        if self.canvas.selected_strand:
+            self.layer_panel.select_strand(self.canvas.selected_strand.name)
+
+    def _on_redo_performed(self):
+        """Handle redo completion - sync layer panel"""
+        self.layer_panel.clear()
+        for strand in self.canvas.strands:
+            self.layer_panel.add_strand(strand.name)
+
+        # Update selection in layer panel
+        if self.canvas.selected_strand:
+            self.layer_panel.select_strand(self.canvas.selected_strand.name)
+
     # ==================== File Operations ====================
 
     def _new_project(self):
@@ -374,14 +457,18 @@ class MainWindow(QMainWindow):
 
         self.canvas.clear_project()
         self.layer_panel.clear()
+        self.undo_redo_manager.clear_history()
         self.current_project_file = None
         self.setWindowTitle("OpenStrandStudio 3D - New Project")
         self.statusbar.showMessage("New project created", 3000)
 
     def _clear_all_strands(self):
         """Clear all strands from the canvas"""
+        # Save state before clearing for undo
+        self.undo_redo_manager.save_state()
         self.canvas.clear_project()
         self.layer_panel.clear()
+        self.statusbar.showMessage("Cleared all strands", 3000)
 
     def _save_project(self):
         """Save the project to a JSON file"""
@@ -450,6 +537,9 @@ class MainWindow(QMainWindow):
 
             # Load into canvas
             self.canvas.load_project_data(project_data)
+
+            # Clear undo history (fresh start with loaded project)
+            self.undo_redo_manager.clear_history()
 
             # Update layer panel with loaded strands
             for strand in self.canvas.strands:

@@ -1069,27 +1069,37 @@ class Strand:
             self.control_point2 = saved['cp2'].copy()
             self._mark_geometry_dirty()
 
-    def set_control_point1(self, position):
+    def set_control_point1(self, position, delta=None):
         """Set the first control point position"""
+        old_cp1 = self.control_point1.copy() if delta is None else None
         self.control_point1 = np.array(position, dtype=float)
         self._mark_geometry_dirty()
 
-        # Sync attached strands at start (attachment_side == 0) for C1 continuity
+        # Calculate delta if not provided
+        if delta is None:
+            delta = self.control_point1 - old_cp1
+
+        # Sync attached strands at start (attachment_side == 0) - mirror movement
         for attached in self.attached_strands:
             if hasattr(attached, 'attachment_side') and attached.attachment_side == 0:
                 if hasattr(attached, 'sync_cp1_with_parent'):
-                    attached.sync_cp1_with_parent()
+                    attached.sync_cp1_with_parent(delta)
 
-    def set_control_point2(self, position):
+    def set_control_point2(self, position, delta=None):
         """Set the second control point position"""
+        old_cp2 = self.control_point2.copy() if delta is None else None
         self.control_point2 = np.array(position, dtype=float)
         self._mark_geometry_dirty()
 
-        # Sync attached strands at end (attachment_side == 1) for C1 continuity
+        # Calculate delta if not provided
+        if delta is None:
+            delta = self.control_point2 - old_cp2
+
+        # Sync attached strands at end (attachment_side == 1) - mirror movement
         for attached in self.attached_strands:
             if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
                 if hasattr(attached, 'sync_cp1_with_parent'):
-                    attached.sync_cp1_with_parent()
+                    attached.sync_cp1_with_parent(delta)
 
     def set_start(self, position):
         """Set the start position"""

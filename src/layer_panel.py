@@ -16,6 +16,7 @@ class SetGroupHeader(QPushButton):
     """Collapsible header for a set group"""
 
     toggled_collapse = pyqtSignal(bool)  # True = collapsed
+    duplicate_requested = pyqtSignal(str)  # set number
 
     def __init__(self, set_number: str, parent=None):
         super().__init__(parent)
@@ -29,6 +30,8 @@ class SetGroupHeader(QPushButton):
         self.setFixedHeight(32)
         self.setCursor(Qt.PointingHandCursor)
         self.clicked.connect(self._toggle)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
         self._update_style()
 
     def _update_style(self):
@@ -68,9 +71,20 @@ class SetGroupHeader(QPushButton):
         self.strand_count = count
         self._update_style()
 
+    def _show_context_menu(self, pos):
+        from set_group_menu import build_set_group_menu
+
+        menu = build_set_group_menu(
+            self,
+            on_duplicate=lambda: self.duplicate_requested.emit(self.set_number)
+        )
+        menu.exec_(self.mapToGlobal(pos))
+
 
 class SetGroup(QWidget):
     """A collapsible group containing strands from the same set"""
+
+    duplicate_requested = pyqtSignal(str)  # set number
 
     def __init__(self, set_number: str, parent=None):
         super().__init__(parent)
@@ -87,6 +101,7 @@ class SetGroup(QWidget):
         # Header
         self.header = SetGroupHeader(self.set_number)
         self.header.toggled_collapse.connect(self._on_toggle)
+        self.header.duplicate_requested.connect(self.duplicate_requested.emit)
         layout.addWidget(self.header)
 
         # Container for strand buttons
@@ -350,6 +365,7 @@ class LayerPanel(QWidget):
     strand_visibility_changed = pyqtSignal(str, bool)  # name, visible
     strand_color_changed = pyqtSignal(str, tuple)      # name, color
     strand_delete_requested = pyqtSignal(str)   # strand name
+    set_duplicate_requested = pyqtSignal(str)   # set number
     deselect_all_requested = pyqtSignal()       # deselect all strands
 
     def __init__(self, parent=None):
@@ -471,6 +487,7 @@ class LayerPanel(QWidget):
         if set_number not in self.set_groups:
             group = SetGroup(set_number)
             self.set_groups[set_number] = group
+            group.duplicate_requested.connect(self._on_set_duplicate_requested)
             # Insert group in sorted order (before stretch)
             self._insert_group_sorted(group)
 
@@ -632,6 +649,10 @@ class LayerPanel(QWidget):
                 # Fallback to individual updates if set_number isn't a valid int
                 for name in strands_in_set:
                     self.strand_color_changed.emit(name, color)
+
+    def _on_set_duplicate_requested(self, set_number: str):
+        """Forward set-level duplication requests to the main window."""
+        self.set_duplicate_requested.emit(set_number)
 
     def clear(self):
         """Remove all layer buttons and set groups"""
