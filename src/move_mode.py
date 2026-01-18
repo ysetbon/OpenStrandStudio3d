@@ -429,6 +429,8 @@ class MoveModeMixin:
             return
 
         strand = self.moving_strand
+        if hasattr(self, "_add_drag_lod_target"):
+            self._add_drag_lod_target(strand)
 
         # Get current position of what we're moving
         if self.moving_control_point == 'start':
@@ -553,6 +555,8 @@ class MoveModeMixin:
                 if attachment_side == 0:
                     # Connected to parent's start
                     parent.set_start(parent.start + delta)
+                    if hasattr(self, "_add_drag_lod_target"):
+                        self._add_drag_lod_target(parent)
                     # In straight mode, re-straighten parent
                     if self.straight_segment_mode:
                         parent.make_straight()
@@ -561,6 +565,8 @@ class MoveModeMixin:
                 else:
                     # Connected to parent's end
                     parent.set_end(parent.end + delta)
+                    if hasattr(self, "_add_drag_lod_target"):
+                        self._add_drag_lod_target(parent)
                     # In straight mode, re-straighten parent
                     if self.straight_segment_mode:
                         parent.make_straight()
@@ -601,6 +607,8 @@ class MoveModeMixin:
                 attached.end = attached.end + delta
                 attached.control_point2 = attached.control_point2 + delta
                 attached._mark_geometry_dirty()
+                if hasattr(self, "_add_drag_lod_target"):
+                    self._add_drag_lod_target(attached)
 
                 # In straight mode, re-straighten the attached strand
                 if self.straight_segment_mode:

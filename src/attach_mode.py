@@ -66,7 +66,10 @@ class AttachModeMixin:
 
         # Draw preview of new strand being attached
         if self.attaching and self.attach_new_strand:
-            self.attach_new_strand.draw(is_selected=True, is_hovered=False)
+            lod = None
+            if hasattr(self, "_get_drag_lod_for_strand"):
+                lod = self._get_drag_lod_for_strand(self.attach_new_strand, force_drag=True)
+            self.attach_new_strand.draw(is_selected=True, is_hovered=False, lod=lod)
 
         glDisable(GL_BLEND)
         glEnable(GL_LIGHTING)

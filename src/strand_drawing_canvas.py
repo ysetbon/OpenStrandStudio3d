@@ -83,6 +83,17 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self.move_fps_limit = 30.0
         self._last_move_frame_time = 0.0
 
+        # Attach mode rendering throttle (max FPS while dragging attach preview)
+        self.attach_fps_limit = 30.0
+        self._last_attach_frame_time = 0.0
+
+        # Drag LOD (lower-res while moving a strand/control point)
+        self.drag_lod_enabled = True
+        self.drag_curve_segments = 28
+        self.drag_tube_segments = 20
+        self.drag_cap_segments = 12
+        self._drag_lod_targets = set()
+
         # Grid and axes settings
         self.show_grid = True
         self.show_axes = True
@@ -408,21 +419,32 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
     def _draw_strands(self):
         """Draw all strands in the scene"""
         camera_pos = self._get_camera_position()
+        drag_roots = self._get_drag_lod_roots() if self.drag_lod_enabled else set()
+
         for strand in self.strands:
             is_selected = (strand == self.selected_strand)
             is_hovered = (strand == self.hovered_strand)
-            lod = self._get_lod_for_strand(strand, camera_pos)
+            if self._should_use_drag_lod(strand, drag_roots):
+                lod = self._get_drag_lod_for_strand(strand, camera_pos, force_drag=True)
+            else:
+                lod = self._get_lod_for_strand(strand, camera_pos)
             strand.draw(is_selected, is_hovered, lod=lod)
 
         # Draw selection highlight for selected strand (semi-transparent overlay)
         if self.selected_strand and self.selected_strand.visible:
-            lod = self._get_lod_for_strand(self.selected_strand, camera_pos)
+            if self._should_use_drag_lod(self.selected_strand, drag_roots):
+                lod = self._get_drag_lod_for_strand(self.selected_strand, camera_pos, force_drag=True)
+            else:
+                lod = self._get_lod_for_strand(self.selected_strand, camera_pos)
             self.selected_strand.draw_selection_highlight(lod=lod)
 
         # Draw hover highlight separately (avoid stacking with selection)
         if (self.hovered_strand and self.hovered_strand.visible and
                 self.hovered_strand != self.selected_strand):
-            lod = self._get_lod_for_strand(self.hovered_strand, camera_pos)
+            if self._should_use_drag_lod(self.hovered_strand, drag_roots):
+                lod = self._get_drag_lod_for_strand(self.hovered_strand, camera_pos, force_drag=True)
+            else:
+                lod = self._get_lod_for_strand(self.hovered_strand, camera_pos)
             self.hovered_strand.draw_hover_highlight(lod=lod)
 
     def _get_camera_position(self):
@@ -472,6 +494,77 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             "tube_segments": min(tube_segments, strand.tube_segments),
             "cap_segments": cap_segments
         }
+
+    def _get_chain_root_for_strand(self, strand):
+        """Return the chain root for the given strand."""
+        from attached_strand import AttachedStrand
+
+        current = strand
+        if isinstance(current, AttachedStrand):
+            if current.attachment_side == 0:
+                return current
+            while isinstance(current, AttachedStrand) and current.attachment_side == 1:
+                current = current.parent_strand
+        return current
+
+    def _get_drag_lod(self):
+        """Return drag LOD settings."""
+        return {
+            "curve_segments": self.drag_curve_segments,
+            "tube_segments": self.drag_tube_segments,
+            "cap_segments": self.drag_cap_segments
+        }
+
+    def _reset_drag_lod_targets(self):
+        """Reset the set of strands participating in drag LOD."""
+        self._drag_lod_targets.clear()
+
+    def _add_drag_lod_target(self, strand):
+        """Add a strand to the drag LOD set."""
+        if strand is None:
+            return
+        self._drag_lod_targets.add(strand)
+
+    def _get_drag_lod_roots(self):
+        """Return chain roots that should use drag LOD."""
+        targets = set(self._drag_lod_targets)
+        if self.moving_strand:
+            targets.add(self.moving_strand)
+        if self.attaching and self.attach_new_strand:
+            targets.add(self.attach_new_strand)
+
+        roots = set()
+        for strand in targets:
+            roots.add(self._get_chain_root_for_strand(strand))
+        return roots
+
+    def _should_use_drag_lod(self, strand, drag_roots):
+        """Check if a strand should use drag LOD based on its chain root."""
+        if not drag_roots:
+            return False
+        return self._get_chain_root_for_strand(strand) in drag_roots
+
+    def _merge_lod(self, base, override):
+        """Merge two LOD dicts by taking the minimum of each component."""
+        if base is None:
+            return override
+        return {
+            "curve_segments": min(base.get("curve_segments", override["curve_segments"]),
+                                  override["curve_segments"]),
+            "tube_segments": min(base.get("tube_segments", override["tube_segments"]),
+                                 override["tube_segments"]),
+            "cap_segments": min(base.get("cap_segments", override["cap_segments"]),
+                                override["cap_segments"])
+        }
+
+    def _get_drag_lod_for_strand(self, strand, camera_pos=None, force_drag=False):
+        """Get LOD for a strand, optionally forcing drag LOD."""
+        if camera_pos is None:
+            camera_pos = self._get_camera_position()
+        base_lod = self._get_lod_for_strand(strand, camera_pos)
+        if not self.drag_lod_enabled or not force_drag:
+            return base_lod
+        return self._merge_lod(base_lod, self._get_drag_lod())
 
     def _draw_strand_preview(self):
         """Draw preview while creating a new strand"""
@@ -630,10 +723,15 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                 # Start moving selected strand or control point (from MoveModeMixin)
                 self._start_move(event.x(), event.y())
                 self._last_move_frame_time = 0.0
+                self._reset_drag_lod_targets()
+                self._add_drag_lod_target(self.moving_strand)
 
             elif self.current_mode == "attach":
                 # Start attaching a new strand (from AttachModeMixin)
                 self._start_attach(event.x(), event.y())
+                self._last_attach_frame_time = 0.0
+                self._reset_drag_lod_targets()
+                self._add_drag_lod_target(self.attach_new_strand)
 
         self.update()
 
@@ -655,10 +753,12 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             elif self.current_mode == "move" and self.moving_strand:
                 # End move operation (from MoveModeMixin)
                 self._end_move()
+                self._reset_drag_lod_targets()
 
             elif self.current_mode == "attach" and self.attaching:
                 # Finish attachment (from AttachModeMixin)
                 self._finish_attach(event.x(), event.y())
+                self._reset_drag_lod_targets()
 
         self.mouse_pressed = False
         self.mouse_button = None
@@ -715,8 +815,11 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                     else:
                         update_needed = False
                 elif self.current_mode == "attach" and self.attaching:
-                    # Update attached strand end position (from AttachModeMixin)
-                    self._update_attach(event.x(), event.y(), axis_mode=self.attach_axis_mode)
+                    if self._should_process_attach_frame():
+                        # Update attached strand end position (from AttachModeMixin)
+                        self._update_attach(event.x(), event.y(), axis_mode=self.attach_axis_mode)
+                    else:
+                        update_needed = False
                 else:
                     # Default: Left mouse drag = Pan (move view)
                     self._pan_camera(dx, dy)
@@ -742,6 +845,17 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         if now - self._last_move_frame_time < min_interval:
             return False
         self._last_move_frame_time = now
+        return True
+
+    def _should_process_attach_frame(self):
+        """Throttle attach-mode updates to avoid redrawing faster than the FPS limit."""
+        if self.attach_fps_limit <= 0:
+            return True
+        now = time.perf_counter()
+        min_interval = 1.0 / self.attach_fps_limit
+        if now - self._last_attach_frame_time < min_interval:
+            return False
+        self._last_attach_frame_time = now
         return True
 
     def set_attach_axis_mode(self, mode: str):
