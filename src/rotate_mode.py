@@ -90,20 +90,14 @@ class RotateModeMixin:
         self.rotate_selected_set = set_number_str
         self.rotate_center = center
 
-        # Default axis direction based on mode
-        if self.rotate_axis_mode == "vertical":
-            self.rotate_axis_direction = np.array([0.0, 1.0, 0.0])
-        else:
-            # Default to camera-facing horizontal axis
-            azimuth_rad = math.radians(self.camera_azimuth)
-            self.rotate_axis_direction = np.array([
-                math.cos(azimuth_rad),
-                0.0,
-                -math.sin(azimuth_rad)
-            ])
+        # Calculate initial axis as the NORMAL (perpendicular) to the plane of the strands
+        # This is the natural rotation axis - rotating around it keeps strands in their plane
+        self.rotate_axis_direction = self._calculate_plane_normal(group_strands)
 
         # Set the axis arrow end point (1 unit from center)
         self.rotate_axis_end = center + self.rotate_axis_direction * self.ROTATE_ARROW_LENGTH
+
+        print(f"Rotate: Initial axis (plane normal) = {self.rotate_axis_direction}")
 
         # Store initial positions for all strands in the group
         self.rotate_initial_positions = {}
@@ -131,6 +125,73 @@ class RotateModeMixin:
 
         center = np.mean(points, axis=0)
         return center
+
+    def _calculate_plane_normal(self, strands):
+        """
+        Calculate the normal vector (perpendicular) to the plane formed by strand points.
+
+        This uses the cross product of two vectors formed by the start/end points
+        to find a vector perpendicular to the plane that best fits the points.
+
+        Args:
+            strands: List of strand objects
+
+        Returns:
+            Normalized normal vector, or default Y-up if calculation fails
+        """
+        if len(strands) < 1:
+            return np.array([0.0, 1.0, 0.0])  # Default to Y-up
+
+        # Collect all start and end points
+        points = []
+        for strand in strands:
+            points.append(np.array(strand.start))
+            points.append(np.array(strand.end))
+
+        if len(points) < 3:
+            # Not enough points, use strand direction cross with Y
+            if len(strands) >= 1:
+                strand_dir = strands[0].end - strands[0].start
+                normal = np.cross(strand_dir, np.array([0.0, 1.0, 0.0]))
+                norm_len = np.linalg.norm(normal)
+                if norm_len > 1e-6:
+                    return normal / norm_len
+            return np.array([0.0, 1.0, 0.0])
+
+        # Calculate center
+        center = np.mean(points, axis=0)
+
+        # Find two vectors from center to different points
+        # Try to find vectors that are not collinear
+        best_normal = None
+        best_area = 0
+
+        for i in range(len(points)):
+            for j in range(i + 1, len(points)):
+                v1 = points[i] - center
+                v2 = points[j] - center
+
+                # Cross product gives normal to the plane containing v1 and v2
+                normal = np.cross(v1, v2)
+                area = np.linalg.norm(normal)
+
+                # Keep the cross product with largest area (most perpendicular vectors)
+                if area > best_area:
+                    best_area = area
+                    best_normal = normal
+
+        if best_normal is not None and best_area > 1e-6:
+            # Normalize the normal vector
+            best_normal = best_normal / best_area
+
+            # Make sure normal points "up" (positive Y component) for consistency
+            if best_normal[1] < 0:
+                best_normal = -best_normal
+
+            return best_normal
+
+        # Fallback: use Y-up
+        return np.array([0.0, 1.0, 0.0])
 
     def _draw_rotate_mode_indicators(self):
         """Draw visual indicators for rotate mode."""
@@ -351,25 +412,44 @@ class RotateModeMixin:
         return False
 
     def _update_rotate_axis(self, screen_x, screen_y):
-        """Update the rotation axis based on mouse position."""
-        if self.rotate_center is None:
+        """
+        Update the rotation axis based on mouse position.
+
+        In XZ mode: Move the handle on the XZ plane (horizontal), keeping current Y
+        In Y mode: Move the handle vertically (Y axis), keeping current XZ position
+
+        This allows building up the 3D position incrementally:
+        1. First set XZ position in XZ mode
+        2. Then switch to Y mode to adjust height while keeping XZ
+        """
+        if self.rotate_center is None or self.rotate_axis_end is None:
             return
 
+        # Make a copy of current axis end to preserve components
+        current_end = self.rotate_axis_end.copy()
+
         if self.rotate_axis_mode == "vertical":
-            # Y axis movement - move axis end vertically
+            # Y axis movement - move axis end vertically, KEEP current X and Z
             new_pos = self._screen_to_vertical_plane(screen_x, screen_y, self.rotate_axis_end)
             if new_pos:
                 new_pos = np.array(new_pos)
-                # Keep X and Z from current, only change Y
-                self.rotate_axis_end[1] = new_pos[1]
+                # Only update Y, preserve X and Z from current position
+                self.rotate_axis_end = np.array([
+                    current_end[0],  # Keep X
+                    new_pos[1],      # Update Y
+                    current_end[2]   # Keep Z
+                ])
         else:
-            # XZ plane movement
-            new_pos = self._screen_to_ground(screen_x, screen_y, ground_y=self.rotate_center[1])
+            # XZ plane movement - KEEP current Y
+            new_pos = self._screen_to_ground(screen_x, screen_y, ground_y=current_end[1])
             if new_pos:
                 new_pos = np.array(new_pos)
-                # Keep Y from current, only change X and Z
-                self.rotate_axis_end[0] = new_pos[0]
-                self.rotate_axis_end[2] = new_pos[2]
+                # Only update X and Z, preserve Y from current position
+                self.rotate_axis_end = np.array([
+                    new_pos[0],      # Update X
+                    current_end[1],  # Keep Y
+                    new_pos[2]       # Update Z
+                ])
 
         # Update direction (normalized) and normalize to ARROW_LENGTH
         direction = self.rotate_axis_end - self.rotate_center
@@ -530,23 +610,16 @@ class RotateModeMixin:
         return closest
 
     def set_rotate_axis_mode(self, mode):
-        """Set the rotation axis mode (normal/vertical)."""
-        self.rotate_axis_mode = mode
-        print(f"Rotate axis mode: {mode}")
+        """
+        Set the rotation axis mode (normal/vertical).
 
-        # Update axis direction if already in rotate mode
-        if self.rotate_mode_active and self.rotate_center is not None:
-            if mode == "vertical":
-                self.rotate_axis_direction = np.array([0.0, 1.0, 0.0])
-            else:
-                azimuth_rad = math.radians(self.camera_azimuth)
-                self.rotate_axis_direction = np.array([
-                    math.cos(azimuth_rad),
-                    0.0,
-                    -math.sin(azimuth_rad)
-                ])
-            self.rotate_axis_end = self.rotate_center + self.rotate_axis_direction * self.ROTATE_ARROW_LENGTH
-            self.update()
+        This changes which axis mouse movement controls, but does NOT reset
+        the current axis position. This allows:
+        1. Set XZ position in XZ mode
+        2. Switch to Y mode to adjust height while keeping XZ position
+        """
+        self.rotate_axis_mode = mode
+        print(f"Rotate axis mode: {mode} (preserving current axis position)")
 
     def _screen_to_vertical_plane(self, screen_x, screen_y, reference_point):
         """Convert screen coordinates to a point on a vertical plane through reference_point."""
