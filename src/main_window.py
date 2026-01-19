@@ -524,11 +524,18 @@ class MainWindow(QMainWindow):
 
     def _on_set_rotate_requested(self, set_number: str):
         """Handle rotation of a full strand set from the layer panel."""
-        success = self.canvas.start_rotate_group_strand(set_number)
+        # Switch to rotate mode and select the set
+        self._set_mode("rotate")
+        success = self.canvas.select_set_for_rotation(set_number)
         if success:
             self.statusbar.showMessage(
-                f"Rotating set {set_number} - Move mouse to define axis, drag to rotate",
+                f"Rotating set {set_number} - Drag handle to set axis, click center to rotate",
                 5000
+            )
+        else:
+            self.statusbar.showMessage(
+                f"Could not select set {set_number} for rotation",
+                3000
             )
 
     # ==================== Undo/Redo ====================
