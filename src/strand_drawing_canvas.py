@@ -99,6 +99,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self.attach_fps_limit = 30.0
         self._last_attach_frame_time = 0.0
 
+        # Rotate mode rendering throttle (max FPS while rotating)
+        self.rotate_fps_limit = 30.0
+        self._last_rotate_frame_time = 0.0
+
         # Drag LOD (lower-res while moving a strand/control point)
         self.drag_lod_enabled = True
         self.drag_curve_segments = 28
@@ -566,6 +570,12 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             targets.add(self.moving_strand)
         if self.attaching and self.attach_new_strand:
             targets.add(self.attach_new_strand)
+        # Include strands being rotated
+        if getattr(self, 'is_rotating', False) and getattr(self, 'rotate_selected_set', None):
+            set_prefix = f"{self.rotate_selected_set}_"
+            for strand in self.strands:
+                if strand.name.startswith(set_prefix):
+                    targets.add(strand)
 
         roots = set()
         for strand in targets:
@@ -921,6 +931,19 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         if now - self._last_attach_frame_time < min_interval:
             return False
         self._last_attach_frame_time = now
+        return True
+
+    def _should_process_rotate_frame(self):
+        """Throttle rotate-mode updates to 30 FPS for better performance."""
+        if self.rotate_fps_limit <= 0:
+            return True
+        if not getattr(self, 'is_rotating', False):
+            return True
+        now = time.perf_counter()
+        min_interval = 1.0 / self.rotate_fps_limit
+        if now - self._last_rotate_frame_time < min_interval:
+            return False
+        self._last_rotate_frame_time = now
         return True
 
     def set_attach_axis_mode(self, mode: str):

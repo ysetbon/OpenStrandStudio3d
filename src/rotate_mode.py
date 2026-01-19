@@ -569,7 +569,12 @@ class RotateModeMixin:
         self.rotate_angle = 0.0
         self.rotate_last_screen_x = screen_x
         self.rotate_drag_start_x = screen_x
-        print("Rotate: Started disk rotation - drag left/right to rotate")
+
+        # Reset frame timer for 30 FPS limiting
+        if hasattr(self, '_last_rotate_frame_time'):
+            self._last_rotate_frame_time = 0.0
+
+        print("Rotate: Started disk rotation - drag left/right to rotate (30 FPS, low-res mesh)")
 
     def _is_clicking_rotate_handle(self, screen_x, screen_y):
         """Check if clicking on the axis arrow handle."""
@@ -637,6 +642,10 @@ class RotateModeMixin:
 
     def _update_disk_rotation(self, screen_x):
         """Update rotation based on horizontal mouse movement (dragging left/right on disk)."""
+        # FPS limiting - skip if too soon since last frame (30 FPS)
+        if hasattr(self, '_should_process_rotate_frame') and not self._should_process_rotate_frame():
+            return
+
         if self.rotate_last_screen_x is None:
             self.rotate_last_screen_x = screen_x
             return
