@@ -16,9 +16,10 @@ from OpenGL.GLU import *
 from select_mode import SelectModeMixin
 from move_mode import MoveModeMixin
 from attach_mode import AttachModeMixin
+from rotate_group_strand import RotateGroupStrandMixin
 
 
-class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachModeMixin):
+class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachModeMixin, RotateGroupStrandMixin):
     """3D OpenGL canvas for strand visualization and manipulation"""
 
     # Signals
@@ -70,6 +71,9 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self.hovered_attach_point = None  # (strand, side) tuple for hover feedback
         self.attach_sphere_radius = 0.3  # Radius of attachment point spheres
         self.attach_axis_mode = "normal"  # normal (XZ), vertical (Y), depth (camera), along (other point)
+
+        # Rotate group strand mode state
+        self._init_rotate_group_strand_mode()
 
         # Rigid mode state - shows start/end point spheres
         self.show_rigid_points = False
@@ -764,6 +768,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                 self.creating_strand = False
                 self.new_strand_start = None
 
+            elif self.is_rotating_group():
+                # End rotation operation (from RotateGroupStrandMixin)
+                self.end_rotate_group_strand()
+
             elif self.current_mode == "move" and self.moving_strand:
                 # End move operation (from MoveModeMixin)
                 self._end_move()
@@ -822,6 +830,11 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                 if self.creating_strand:
                     # Update preview while creating strand
                     pass  # Just trigger update below
+                elif self.is_rotating_group():
+                    # Update rotation (from RotateGroupStrandMixin)
+                    # Shift key determines axis mode: normal (XZ) or vertical (Y)
+                    axis_mode = "vertical" if shift_held else "normal"
+                    self.update_rotate_group_strand(event.x(), event.y(), axis_mode=axis_mode)
                 elif self.current_mode == "move" and self.moving_strand:
                     if self._should_process_move_frame():
                         # Update move - use selected move axis mode

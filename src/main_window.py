@@ -291,6 +291,7 @@ class MainWindow(QMainWindow):
         self.layer_panel.strand_visibility_changed.connect(self.canvas.set_strand_visibility)
         self.layer_panel.strand_color_changed.connect(self.canvas.set_strand_color)
         self.layer_panel.set_duplicate_requested.connect(self._on_set_duplicate_requested)
+        self.layer_panel.set_rotate_requested.connect(self._on_set_rotate_requested)
         self.layer_panel.deselect_all_requested.connect(self.canvas.deselect_all)
 
     def _set_mode(self, mode: str):
@@ -401,6 +402,15 @@ class MainWindow(QMainWindow):
             f"Duplicated set {set_number} -> {new_set_number}",
             3000
         )
+
+    def _on_set_rotate_requested(self, set_number: str):
+        """Handle rotation of a full strand set from the layer panel."""
+        success = self.canvas.start_rotate_group_strand(set_number)
+        if success:
+            self.statusbar.showMessage(
+                f"Rotating set {set_number} - Move mouse to define axis, drag to rotate",
+                5000
+            )
 
     # ==================== Undo/Redo ====================
 

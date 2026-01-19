@@ -17,6 +17,7 @@ class SetGroupHeader(QPushButton):
 
     toggled_collapse = pyqtSignal(bool)  # True = collapsed
     duplicate_requested = pyqtSignal(str)  # set number
+    rotate_requested = pyqtSignal(str)  # set number
 
     def __init__(self, set_number: str, parent=None):
         super().__init__(parent)
@@ -76,7 +77,8 @@ class SetGroupHeader(QPushButton):
 
         menu = build_set_group_menu(
             self,
-            on_duplicate=lambda: self.duplicate_requested.emit(self.set_number)
+            on_duplicate=lambda: self.duplicate_requested.emit(self.set_number),
+            on_rotate=lambda: self.rotate_requested.emit(self.set_number)
         )
         menu.exec_(self.mapToGlobal(pos))
 
@@ -85,6 +87,7 @@ class SetGroup(QWidget):
     """A collapsible group containing strands from the same set"""
 
     duplicate_requested = pyqtSignal(str)  # set number
+    rotate_requested = pyqtSignal(str)  # set number
 
     def __init__(self, set_number: str, parent=None):
         super().__init__(parent)
@@ -102,6 +105,7 @@ class SetGroup(QWidget):
         self.header = SetGroupHeader(self.set_number)
         self.header.toggled_collapse.connect(self._on_toggle)
         self.header.duplicate_requested.connect(self.duplicate_requested.emit)
+        self.header.rotate_requested.connect(self.rotate_requested.emit)
         layout.addWidget(self.header)
 
         # Container for strand buttons
@@ -366,6 +370,7 @@ class LayerPanel(QWidget):
     strand_color_changed = pyqtSignal(str, tuple)      # name, color
     strand_delete_requested = pyqtSignal(str)   # strand name
     set_duplicate_requested = pyqtSignal(str)   # set number
+    set_rotate_requested = pyqtSignal(str)      # set number
     deselect_all_requested = pyqtSignal()       # deselect all strands
 
     def __init__(self, parent=None):
@@ -488,6 +493,7 @@ class LayerPanel(QWidget):
             group = SetGroup(set_number)
             self.set_groups[set_number] = group
             group.duplicate_requested.connect(self._on_set_duplicate_requested)
+            group.rotate_requested.connect(self._on_set_rotate_requested)
             # Insert group in sorted order (before stretch)
             self._insert_group_sorted(group)
 
@@ -653,6 +659,10 @@ class LayerPanel(QWidget):
     def _on_set_duplicate_requested(self, set_number: str):
         """Forward set-level duplication requests to the main window."""
         self.set_duplicate_requested.emit(set_number)
+
+    def _on_set_rotate_requested(self, set_number: str):
+        """Forward set-level rotation requests to the main window."""
+        self.set_rotate_requested.emit(set_number)
 
     def clear(self):
         """Remove all layer buttons and set groups"""

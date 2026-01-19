@@ -6,7 +6,7 @@ Context menu builder for set-level operations (e.g., duplicate a set).
 from PyQt5.QtWidgets import QMenu
 
 
-def build_set_group_menu(parent, on_duplicate):
+def build_set_group_menu(parent, on_duplicate, on_rotate):
     """Build the context menu for a set group header."""
     menu = QMenu(parent)
     menu.setStyleSheet("""
@@ -25,5 +25,8 @@ def build_set_group_menu(parent, on_duplicate):
 
     duplicate_action = menu.addAction("Duplicate Set")
     duplicate_action.triggered.connect(on_duplicate)
+
+    rotate_action = menu.addAction("Rotate Set")
+    rotate_action.triggered.connect(on_rotate)
 
     return menu
