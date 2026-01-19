@@ -52,6 +52,8 @@ class RotateModeMixin:
         self.rotate_total_angle = 0.0  # Total accumulated rotation angle for display
         self.rotate_last_screen_x = None  # For tracking horizontal drag on disk
         self.rotate_drag_start_x = None  # Starting X position of drag
+        self.rotate_drag_start_screen_pos = None  # (x, y) screen position where drag started
+        self.rotate_current_screen_x = None  # Current mouse X for UI drawing
 
     def _enter_rotate_mode(self):
         """Called when entering rotate mode."""
@@ -223,6 +225,10 @@ class RotateModeMixin:
 
         # Draw angle display
         self._draw_rotation_angle_display()
+
+        # Draw drag UI overlay (2D) when rotating
+        if self.is_rotating:
+            self._draw_rotation_drag_ui()
 
         glEnable(GL_LIGHTING)
 
@@ -472,6 +478,136 @@ class RotateModeMixin:
 
         glLineWidth(1.0)
 
+    def _draw_rotation_drag_ui(self):
+        """
+        Draw 2D overlay UI showing drag direction when rotating.
+        Shows: ← angle ● angle → with color coding
+        """
+        if not self.is_rotating or self.rotate_drag_start_screen_pos is None:
+            return
+
+        start_x, start_y = self.rotate_drag_start_screen_pos
+        current_x = self.rotate_current_screen_x or start_x
+
+        # Switch to 2D orthographic projection for screen-space drawing
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+
+        width = self.width()
+        height = self.height()
+        glOrtho(0, width, height, 0, -1, 1)  # Y flipped for screen coords
+
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+
+        glDisable(GL_DEPTH_TEST)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+        # Line parameters
+        line_length = 150  # pixels on each side
+        line_y = start_y
+        arrow_size = 12
+
+        # Calculate angle for display
+        angle_degrees = math.degrees(self.rotate_total_angle)
+
+        # Draw left side (negative/red) ←
+        glLineWidth(3.0)
+        glColor4f(1.0, 0.3, 0.3, 0.9)  # Red
+        glBegin(GL_LINES)
+        glVertex2f(start_x, line_y)
+        glVertex2f(start_x - line_length, line_y)
+        glEnd()
+
+        # Left arrow head
+        glBegin(GL_TRIANGLES)
+        glVertex2f(start_x - line_length, line_y)
+        glVertex2f(start_x - line_length + arrow_size, line_y - arrow_size * 0.6)
+        glVertex2f(start_x - line_length + arrow_size, line_y + arrow_size * 0.6)
+        glEnd()
+
+        # Draw right side (positive/green) →
+        glColor4f(0.3, 1.0, 0.3, 0.9)  # Green
+        glBegin(GL_LINES)
+        glVertex2f(start_x, line_y)
+        glVertex2f(start_x + line_length, line_y)
+        glEnd()
+
+        # Right arrow head
+        glBegin(GL_TRIANGLES)
+        glVertex2f(start_x + line_length, line_y)
+        glVertex2f(start_x + line_length - arrow_size, line_y - arrow_size * 0.6)
+        glVertex2f(start_x + line_length - arrow_size, line_y + arrow_size * 0.6)
+        glEnd()
+
+        # Draw center point (white circle)
+        glColor4f(1.0, 1.0, 1.0, 1.0)
+        glPointSize(10.0)
+        glBegin(GL_POINTS)
+        glVertex2f(start_x, line_y)
+        glEnd()
+
+        # Draw current position indicator (follows mouse)
+        drag_offset = current_x - start_x
+        if abs(drag_offset) > 5:
+            # Color based on direction
+            if drag_offset > 0:
+                glColor4f(0.3, 1.0, 0.3, 1.0)  # Green for positive
+            else:
+                glColor4f(1.0, 0.3, 0.3, 1.0)  # Red for negative
+
+            # Draw line from start to current
+            glLineWidth(4.0)
+            glBegin(GL_LINES)
+            glVertex2f(start_x, line_y)
+            glVertex2f(current_x, line_y)
+            glEnd()
+
+            # Draw current position marker
+            glPointSize(14.0)
+            glBegin(GL_POINTS)
+            glVertex2f(current_x, line_y)
+            glEnd()
+
+        # Draw angle text background and text
+        # Position text above the line
+        text_y = line_y - 25
+
+        # Draw angle value as a simple indicator bar
+        angle_bar_width = min(abs(angle_degrees) * 2, 100)  # Scale angle to pixels
+        if angle_degrees != 0:
+            if angle_degrees > 0:
+                glColor4f(0.3, 1.0, 0.3, 0.7)
+                glBegin(GL_QUADS)
+                glVertex2f(start_x, text_y - 8)
+                glVertex2f(start_x + angle_bar_width, text_y - 8)
+                glVertex2f(start_x + angle_bar_width, text_y + 8)
+                glVertex2f(start_x, text_y + 8)
+                glEnd()
+            else:
+                glColor4f(1.0, 0.3, 0.3, 0.7)
+                glBegin(GL_QUADS)
+                glVertex2f(start_x, text_y - 8)
+                glVertex2f(start_x - angle_bar_width, text_y - 8)
+                glVertex2f(start_x - angle_bar_width, text_y + 8)
+                glVertex2f(start_x, text_y + 8)
+                glEnd()
+
+        glLineWidth(1.0)
+        glPointSize(1.0)
+        glDisable(GL_BLEND)
+        glEnable(GL_DEPTH_TEST)
+
+        # Restore matrices
+        glMatrixMode(GL_MODELVIEW)
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+
     def _is_clicking_rotation_disk(self, screen_x, screen_y):
         """Check if clicking on or near the rotation disk."""
         if self.rotate_center is None:
@@ -543,7 +679,7 @@ class RotateModeMixin:
 
         # Check if clicking on the rotation disk to start rotation (SECOND priority)
         if self._is_clicking_rotation_disk(screen_x, screen_y):
-            self._start_disk_rotation(screen_x)
+            self._start_disk_rotation(screen_x, screen_y)
             return True
 
         # Click elsewhere - deselect
@@ -555,7 +691,7 @@ class RotateModeMixin:
         self.update()
         return False
 
-    def _start_disk_rotation(self, screen_x):
+    def _start_disk_rotation(self, screen_x, screen_y=None):
         """Start rotation via disk drag."""
         if not self.rotate_mode_active or self.rotate_selected_set is None:
             return
@@ -569,6 +705,18 @@ class RotateModeMixin:
         self.rotate_angle = 0.0
         self.rotate_last_screen_x = screen_x
         self.rotate_drag_start_x = screen_x
+        self.rotate_current_screen_x = screen_x
+
+        # Store screen position for UI overlay
+        if screen_y is not None:
+            self.rotate_drag_start_screen_pos = (screen_x, screen_y)
+        else:
+            # Get Y from center projection if not provided
+            center_screen = self._project_point_to_screen(self.rotate_center)
+            if center_screen:
+                self.rotate_drag_start_screen_pos = (screen_x, center_screen[1])
+            else:
+                self.rotate_drag_start_screen_pos = (screen_x, self.height() // 2)
 
         # Reset frame timer for 30 FPS limiting
         if hasattr(self, '_last_rotate_frame_time'):
@@ -642,8 +790,12 @@ class RotateModeMixin:
 
     def _update_disk_rotation(self, screen_x):
         """Update rotation based on horizontal mouse movement (dragging left/right on disk)."""
+        # Always track current X for UI drawing
+        self.rotate_current_screen_x = screen_x
+
         # FPS limiting - skip if too soon since last frame (30 FPS)
         if hasattr(self, '_should_process_rotate_frame') and not self._should_process_rotate_frame():
+            self.update()  # Still update to redraw UI
             return
 
         if self.rotate_last_screen_x is None:
@@ -820,6 +972,8 @@ class RotateModeMixin:
             self.is_rotating = False
             self.rotate_last_screen_x = None
             self.rotate_drag_start_x = None
+            self.rotate_drag_start_screen_pos = None  # Clear drag UI
+            self.rotate_current_screen_x = None
             # Reset initial positions for next rotation (keep current positions as new base)
             if self.rotate_selected_set:
                 set_prefix = f"{self.rotate_selected_set}_"
