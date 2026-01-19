@@ -18,9 +18,10 @@ from move_mode import MoveModeMixin
 from attach_mode import AttachModeMixin
 from rotate_group_strand import RotateGroupStrandMixin
 from stretch_mode import StretchModeMixin
+from rotate_mode import RotateModeMixin
 
 
-class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachModeMixin, RotateGroupStrandMixin, StretchModeMixin):
+class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachModeMixin, RotateGroupStrandMixin, StretchModeMixin, RotateModeMixin):
     """3D OpenGL canvas for strand visualization and manipulation"""
 
     # Signals
@@ -73,11 +74,14 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self.attach_sphere_radius = 0.3  # Radius of attachment point spheres
         self.attach_axis_mode = "normal"  # normal (XZ), vertical (Y), depth (camera), along (other point)
 
-        # Rotate group strand mode state
+        # Rotate group strand mode state (old style - triggered from layer panel)
         self._init_rotate_group_strand_mode()
 
         # Stretch mode state
         self._init_stretch_mode()
+
+        # Rotate mode state (new style - with visual arrow)
+        self._init_rotate_mode()
 
         # Rigid mode state - shows start/end point spheres
         self.show_rigid_points = False
@@ -264,6 +268,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         # Draw stretch mode indicators (from StretchModeMixin)
         if self.current_mode == "stretch":
             self._draw_stretch_mode_indicators()
+
+        # Draw rotate mode indicators (from RotateModeMixin)
+        if self.current_mode == "rotate":
+            self._draw_rotate_mode_indicators()
 
         # Draw rigid points (start/end spheres) if enabled
         if self.show_rigid_points:
@@ -763,6 +771,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                 # Handle stretch mode click (from StretchModeMixin)
                 self._stretch_mode_mouse_press(event)
 
+            elif self.current_mode == "rotate":
+                # Handle rotate mode click (from RotateModeMixin)
+                self._rotate_mode_mouse_press(event)
+
         self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent):
@@ -797,6 +809,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             elif self.current_mode == "stretch":
                 # Finish stretch direction selection and auto-stretch (from StretchModeMixin)
                 self._stretch_mode_mouse_release(event)
+
+            elif self.current_mode == "rotate":
+                # Finish rotate mode mouse release (from RotateModeMixin)
+                self._rotate_mode_mouse_release(event)
 
         self.mouse_pressed = False
         self.mouse_button = None
@@ -866,6 +882,9 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                 elif self.current_mode == "stretch" and getattr(self, 'is_editing_vector', False):
                     # Update stretch direction vector (from StretchModeMixin)
                     self._stretch_mode_mouse_move(event)
+                elif self.current_mode == "rotate" and (getattr(self, 'is_editing_rotate_axis', False) or getattr(self, 'is_rotating', False)):
+                    # Update rotate axis or perform rotation (from RotateModeMixin)
+                    self._rotate_mode_mouse_move(event)
                 else:
                     # Default: Left mouse drag = Pan (move view)
                     self._pan_camera(dx, dy)
@@ -1389,6 +1408,12 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             self._enter_stretch_mode()
         else:
             self._exit_stretch_mode()
+
+        # Handle rotate mode entry/exit
+        if mode == "rotate":
+            self._enter_rotate_mode()
+        else:
+            self._exit_rotate_mode()
 
         # Clear selection hover state
         self.hovered_strand = None

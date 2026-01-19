@@ -1,0 +1,618 @@
+"""
+OpenStrandStudio 3D - Rotate Mode
+Handles rotation mode functionality with visual arrow indicator and editable axis.
+Similar to stretch mode but for rotating strand groups around a defined axis.
+"""
+
+import math
+import numpy as np
+from PyQt5.QtCore import Qt
+from OpenGL.GL import *
+from OpenGL.GLU import *
+
+
+class RotateModeMixin:
+    """
+    Mixin class providing rotation mode functionality with visual arrow.
+
+    This class should be inherited by StrandDrawingCanvas along with other mixins.
+    It provides methods for:
+    - Selecting a strand group (set) to rotate
+    - Drawing a gradient 1-unit arrow showing rotation axis
+    - Editable arrow endpoint for adjusting axis direction
+    - XZ and Y axis modes for rotation
+    - Executing rotation by mouse drag
+    """
+
+    # Rotate mode visual settings
+    ROTATE_ARROW_LENGTH = 1.0  # Length of the rotation axis arrow
+    ROTATE_ARROW_START_COLOR = (0.2, 0.6, 1.0)  # Blue at base
+    ROTATE_ARROW_END_COLOR = (1.0, 0.3, 0.8)  # Magenta at tip
+    ROTATE_CENTER_COLOR = (1.0, 1.0, 0.0)  # Yellow for rotation center
+    ROTATE_HANDLE_COLOR = (1.0, 0.5, 0.0)  # Orange for draggable handle
+    ROTATE_CENTER_RADIUS = 0.15
+    ROTATE_HANDLE_RADIUS = 0.12
+
+    def _init_rotate_mode(self):
+        """Initialize rotate mode state variables."""
+        self.rotate_mode_active = False
+        self.rotate_selected_set = None  # Set number being rotated
+        self.rotate_center = None  # Center point of rotation (calculated from group)
+        self.rotate_axis_end = None  # End point of the 1-unit axis arrow
+        self.rotate_axis_direction = None  # Normalized axis direction
+        self.rotate_axis_mode = "normal"  # 'normal' (XZ), 'vertical' (Y)
+        self.is_editing_rotate_axis = False  # True while editing the axis arrow
+        self.is_rotating = False  # True while performing rotation
+        self.rotate_initial_positions = {}  # Store original positions for rotation
+        self.rotate_angle = 0.0  # Current rotation angle
+        self.rotate_last_screen_y = None  # For tracking rotation drag
+
+    def _enter_rotate_mode(self):
+        """Called when entering rotate mode."""
+        self._init_rotate_mode()
+        self.update()
+
+    def _exit_rotate_mode(self):
+        """Called when exiting rotate mode."""
+        if hasattr(self, 'rotate_mode_active'):
+            self.rotate_mode_active = False
+            self.rotate_selected_set = None
+            self.rotate_center = None
+            self.rotate_axis_end = None
+            self.rotate_axis_direction = None
+            self.is_editing_rotate_axis = False
+            self.is_rotating = False
+            self.rotate_initial_positions = {}
+
+    def select_set_for_rotation(self, set_number):
+        """
+        Select a strand set for rotation and initialize the axis arrow.
+
+        Args:
+            set_number: The set number to rotate (e.g., "1", "2")
+
+        Returns:
+            True if successful, False otherwise
+        """
+        set_number_str = str(set_number)
+        set_prefix = f"{set_number_str}_"
+        group_strands = [s for s in self.strands if s.name.startswith(set_prefix)]
+
+        if not group_strands:
+            print(f"Rotate: No strands found in set {set_number}")
+            return False
+
+        # Calculate center from start and end points only
+        center = self._calculate_rotation_center(group_strands)
+
+        # Initialize rotation state
+        self.rotate_mode_active = True
+        self.rotate_selected_set = set_number_str
+        self.rotate_center = center
+
+        # Default axis direction based on mode
+        if self.rotate_axis_mode == "vertical":
+            self.rotate_axis_direction = np.array([0.0, 1.0, 0.0])
+        else:
+            # Default to camera-facing horizontal axis
+            azimuth_rad = math.radians(self.camera_azimuth)
+            self.rotate_axis_direction = np.array([
+                math.cos(azimuth_rad),
+                0.0,
+                -math.sin(azimuth_rad)
+            ])
+
+        # Set the axis arrow end point (1 unit from center)
+        self.rotate_axis_end = center + self.rotate_axis_direction * self.ROTATE_ARROW_LENGTH
+
+        # Store initial positions for all strands in the group
+        self.rotate_initial_positions = {}
+        for strand in group_strands:
+            self.rotate_initial_positions[strand.name] = {
+                'start': strand.start.copy(),
+                'end': strand.end.copy(),
+                'cp1': strand.control_point1.copy(),
+                'cp2': strand.control_point2.copy()
+            }
+
+        print(f"Rotate: Selected set {set_number} with center at {center}")
+        self.update()
+        return True
+
+    def _calculate_rotation_center(self, strands):
+        """Calculate the center of a group of strands using only start and end points."""
+        if not strands:
+            return np.array([0.0, 0.0, 0.0])
+
+        points = []
+        for strand in strands:
+            points.append(strand.start)
+            points.append(strand.end)
+
+        center = np.mean(points, axis=0)
+        return center
+
+    def _draw_rotate_mode_indicators(self):
+        """Draw visual indicators for rotate mode."""
+        if self.current_mode != "rotate" or not self.rotate_mode_active:
+            return
+
+        if self.rotate_center is None or self.rotate_axis_end is None:
+            return
+
+        glDisable(GL_LIGHTING)
+
+        # Draw center sphere (yellow)
+        self._draw_rotate_center_sphere()
+
+        # Draw gradient axis arrow
+        self._draw_gradient_axis_arrow()
+
+        # Draw draggable handle at arrow end
+        self._draw_rotate_axis_handle()
+
+        glEnable(GL_LIGHTING)
+
+    def _draw_rotate_center_sphere(self):
+        """Draw a sphere at the rotation center."""
+        glPushMatrix()
+        glTranslatef(self.rotate_center[0], self.rotate_center[1], self.rotate_center[2])
+
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glColor4f(*self.ROTATE_CENTER_COLOR, 0.8)
+
+        quadric = gluNewQuadric()
+        gluQuadricNormals(quadric, GLU_SMOOTH)
+        gluSphere(quadric, self.ROTATE_CENTER_RADIUS, 16, 16)
+        gluDeleteQuadric(quadric)
+
+        glDisable(GL_BLEND)
+        glPopMatrix()
+
+    def _draw_gradient_axis_arrow(self):
+        """Draw a gradient arrow from center to axis end point."""
+        start = self.rotate_center
+        end = self.rotate_axis_end
+
+        # Draw gradient line using multiple segments
+        num_segments = 20
+        glLineWidth(4.0)
+        glBegin(GL_LINE_STRIP)
+
+        for i in range(num_segments + 1):
+            t = i / num_segments
+            # Interpolate position
+            pos = start + t * (end - start)
+            # Interpolate color (blue to magenta gradient)
+            r = self.ROTATE_ARROW_START_COLOR[0] + t * (self.ROTATE_ARROW_END_COLOR[0] - self.ROTATE_ARROW_START_COLOR[0])
+            g = self.ROTATE_ARROW_START_COLOR[1] + t * (self.ROTATE_ARROW_END_COLOR[1] - self.ROTATE_ARROW_START_COLOR[1])
+            b = self.ROTATE_ARROW_START_COLOR[2] + t * (self.ROTATE_ARROW_END_COLOR[2] - self.ROTATE_ARROW_START_COLOR[2])
+            glColor3f(r, g, b)
+            glVertex3f(pos[0], pos[1], pos[2])
+
+        glEnd()
+
+        # Draw arrowhead at the end
+        direction = end - start
+        length = np.linalg.norm(direction)
+        if length > 0.1:
+            direction = direction / length
+            arrow_size = 0.12
+
+            # Find perpendicular vectors for arrowhead
+            if abs(direction[1]) < 0.9:
+                perp1 = np.cross(direction, np.array([0, 1, 0]))
+            else:
+                perp1 = np.cross(direction, np.array([1, 0, 0]))
+            perp1 = perp1 / np.linalg.norm(perp1) * arrow_size
+
+            perp2 = np.cross(direction, perp1)
+            perp2 = perp2 / np.linalg.norm(perp2) * arrow_size
+
+            arrow_base = end - direction * arrow_size * 2
+
+            # Draw cone-like arrowhead
+            glColor3f(*self.ROTATE_ARROW_END_COLOR)
+            glBegin(GL_TRIANGLE_FAN)
+            glVertex3f(end[0], end[1], end[2])  # Tip
+
+            num_cone_segments = 8
+            for i in range(num_cone_segments + 1):
+                angle = 2 * math.pi * i / num_cone_segments
+                offset = perp1 * math.cos(angle) + perp2 * math.sin(angle)
+                base_point = arrow_base + offset
+                glVertex3f(base_point[0], base_point[1], base_point[2])
+
+            glEnd()
+
+        glLineWidth(1.0)
+
+    def _draw_rotate_axis_handle(self):
+        """Draw a draggable handle at the end of the axis arrow."""
+        glPushMatrix()
+        glTranslatef(self.rotate_axis_end[0], self.rotate_axis_end[1], self.rotate_axis_end[2])
+
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+        # Highlight when editing
+        if self.is_editing_rotate_axis:
+            glColor4f(1.0, 1.0, 0.0, 0.9)  # Bright yellow when dragging
+            radius = 0.15
+        else:
+            glColor4f(*self.ROTATE_HANDLE_COLOR, 0.8)
+            radius = self.ROTATE_HANDLE_RADIUS
+
+        quadric = gluNewQuadric()
+        gluQuadricNormals(quadric, GLU_SMOOTH)
+        gluSphere(quadric, radius, 16, 16)
+        gluDeleteQuadric(quadric)
+
+        glDisable(GL_BLEND)
+        glPopMatrix()
+
+    def _rotate_mode_mouse_press(self, event):
+        """Handle mouse press in rotate mode."""
+        screen_x = event.x()
+        screen_y = event.y()
+
+        # If no set is selected yet, try to select one by clicking on a strand
+        if not self.rotate_mode_active:
+            clicked_strand = self._get_strand_at_screen_pos(screen_x, screen_y)
+            if clicked_strand:
+                # Extract set number from strand name
+                parts = clicked_strand.name.split('_')
+                if len(parts) >= 1:
+                    set_number = parts[0]
+                    self.select_set_for_rotation(set_number)
+                    return True
+            return False
+
+        # Check if clicking on the axis handle to edit it
+        if self._is_clicking_rotate_handle(screen_x, screen_y):
+            self.is_editing_rotate_axis = True
+            print("Rotate: Editing axis direction")
+            self.update()
+            return True
+
+        # Check if clicking on the center to start rotation
+        if self._is_clicking_rotate_center(screen_x, screen_y):
+            self._start_rotation(screen_y)
+            return True
+
+        # Click elsewhere - deselect
+        self.rotate_mode_active = False
+        self.rotate_selected_set = None
+        self.rotate_center = None
+        self.rotate_axis_end = None
+        self.update()
+        return False
+
+    def _is_clicking_rotate_handle(self, screen_x, screen_y):
+        """Check if clicking on the axis arrow handle."""
+        if self.rotate_axis_end is None:
+            return False
+
+        screen_pos = self._project_point_to_screen(self.rotate_axis_end)
+        if screen_pos is None:
+            return False
+
+        dx = screen_pos[0] - screen_x
+        dy = screen_pos[1] - screen_y
+        dist = math.sqrt(dx * dx + dy * dy)
+
+        return dist < 25  # 25 pixel threshold
+
+    def _is_clicking_rotate_center(self, screen_x, screen_y):
+        """Check if clicking on the rotation center."""
+        if self.rotate_center is None:
+            return False
+
+        screen_pos = self._project_point_to_screen(self.rotate_center)
+        if screen_pos is None:
+            return False
+
+        dx = screen_pos[0] - screen_x
+        dy = screen_pos[1] - screen_y
+        dist = math.sqrt(dx * dx + dy * dy)
+
+        return dist < 25  # 25 pixel threshold
+
+    def _start_rotation(self, screen_y):
+        """Start the rotation operation."""
+        if not self.rotate_mode_active or self.rotate_selected_set is None:
+            return
+
+        # Save state for undo
+        if hasattr(self, 'undo_redo_manager') and self.undo_redo_manager:
+            self.undo_redo_manager.save_state()
+
+        self.is_rotating = True
+        self.rotate_angle = 0.0
+        self.rotate_last_screen_y = screen_y
+        print("Rotate: Started rotation - drag up/down to rotate")
+
+    def _rotate_mode_mouse_move(self, event):
+        """Handle mouse move in rotate mode."""
+        screen_x = event.x()
+        screen_y = event.y()
+
+        if self.is_editing_rotate_axis:
+            # Update axis direction based on mouse position
+            self._update_rotate_axis(screen_x, screen_y)
+            return True
+
+        if self.is_rotating:
+            # Perform rotation based on mouse Y movement
+            self._update_rotation(screen_y)
+            return True
+
+        return False
+
+    def _update_rotate_axis(self, screen_x, screen_y):
+        """Update the rotation axis based on mouse position."""
+        if self.rotate_center is None:
+            return
+
+        if self.rotate_axis_mode == "vertical":
+            # Y axis movement - move axis end vertically
+            new_pos = self._screen_to_vertical_plane(screen_x, screen_y, self.rotate_axis_end)
+            if new_pos:
+                new_pos = np.array(new_pos)
+                # Keep X and Z from current, only change Y
+                self.rotate_axis_end[1] = new_pos[1]
+        else:
+            # XZ plane movement
+            new_pos = self._screen_to_ground(screen_x, screen_y, ground_y=self.rotate_center[1])
+            if new_pos:
+                new_pos = np.array(new_pos)
+                # Keep Y from current, only change X and Z
+                self.rotate_axis_end[0] = new_pos[0]
+                self.rotate_axis_end[2] = new_pos[2]
+
+        # Update direction (normalized) and normalize to ARROW_LENGTH
+        direction = self.rotate_axis_end - self.rotate_center
+        dir_length = np.linalg.norm(direction)
+        if dir_length > 0.01:
+            self.rotate_axis_direction = direction / dir_length
+            self.rotate_axis_end = self.rotate_center + self.rotate_axis_direction * self.ROTATE_ARROW_LENGTH
+
+        self.update()
+
+    def _update_rotation(self, screen_y):
+        """Update the rotation angle based on mouse Y movement."""
+        if self.rotate_last_screen_y is None:
+            self.rotate_last_screen_y = screen_y
+            return
+
+        screen_dy = screen_y - self.rotate_last_screen_y
+        self.rotate_last_screen_y = screen_y
+
+        # Convert screen movement to angle
+        angle_speed = 0.01  # Radians per pixel
+        angle_delta = -screen_dy * angle_speed
+
+        self.rotate_angle += angle_delta
+
+        # Apply rotation to all strands in the group
+        self._apply_rotation()
+        self.update()
+
+    def _apply_rotation(self):
+        """Apply the current rotation to all strands in the selected set."""
+        if not self.rotate_selected_set or self.rotate_axis_direction is None:
+            return
+
+        set_prefix = f"{self.rotate_selected_set}_"
+        group_strands = [s for s in self.strands if s.name.startswith(set_prefix)]
+
+        for strand in group_strands:
+            if strand.name not in self.rotate_initial_positions:
+                continue
+
+            initial = self.rotate_initial_positions[strand.name]
+
+            # Rotate each point around the axis
+            strand.start = self._rotate_point_around_axis(
+                initial['start'],
+                self.rotate_center,
+                self.rotate_axis_direction,
+                self.rotate_angle
+            )
+
+            strand.end = self._rotate_point_around_axis(
+                initial['end'],
+                self.rotate_center,
+                self.rotate_axis_direction,
+                self.rotate_angle
+            )
+
+            strand.control_point1 = self._rotate_point_around_axis(
+                initial['cp1'],
+                self.rotate_center,
+                self.rotate_axis_direction,
+                self.rotate_angle
+            )
+
+            strand.control_point2 = self._rotate_point_around_axis(
+                initial['cp2'],
+                self.rotate_center,
+                self.rotate_axis_direction,
+                self.rotate_angle
+            )
+
+            strand._mark_geometry_dirty()
+
+    def _rotate_point_around_axis(self, point, center, axis, angle):
+        """
+        Rotate a point around an axis using Rodrigues' rotation formula.
+
+        Args:
+            point: Point to rotate [x, y, z]
+            center: Center of rotation [x, y, z]
+            axis: Normalized rotation axis [x, y, z]
+            angle: Rotation angle in radians
+
+        Returns:
+            Rotated point [x, y, z]
+        """
+        # Translate point to origin
+        p = np.array(point) - np.array(center)
+
+        # Rodrigues' formula
+        cos_angle = np.cos(angle)
+        sin_angle = np.sin(angle)
+        k = np.array(axis)
+
+        term1 = p * cos_angle
+        term2 = np.cross(k, p) * sin_angle
+        term3 = k * np.dot(k, p) * (1 - cos_angle)
+
+        p_rotated = term1 + term2 + term3
+
+        # Translate back
+        return p_rotated + np.array(center)
+
+    def _rotate_mode_mouse_release(self, event):
+        """Handle mouse release in rotate mode."""
+        if self.is_editing_rotate_axis:
+            self.is_editing_rotate_axis = False
+            print("Rotate: Axis editing stopped")
+            self.update()
+            return True
+
+        if self.is_rotating:
+            self.is_rotating = False
+            self.rotate_last_screen_y = None
+            # Reset initial positions for next rotation
+            if self.rotate_selected_set:
+                set_prefix = f"{self.rotate_selected_set}_"
+                group_strands = [s for s in self.strands if s.name.startswith(set_prefix)]
+                for strand in group_strands:
+                    self.rotate_initial_positions[strand.name] = {
+                        'start': strand.start.copy(),
+                        'end': strand.end.copy(),
+                        'cp1': strand.control_point1.copy(),
+                        'cp2': strand.control_point2.copy()
+                    }
+            self.rotate_angle = 0.0
+            print(f"Rotate: Rotation completed")
+            self.update()
+            return True
+
+        return False
+
+    def _get_strand_at_screen_pos(self, screen_x, screen_y):
+        """Find a strand near the given screen position."""
+        min_dist = float('inf')
+        closest = None
+        threshold = 30  # Screen pixels
+
+        for strand in self.strands:
+            if not strand.visible:
+                continue
+
+            # Check distance to strand center
+            center = (strand.start + strand.end) / 2
+            screen_pos = self._project_point_to_screen(center)
+            if screen_pos is None:
+                continue
+
+            dx = screen_pos[0] - screen_x
+            dy = screen_pos[1] - screen_y
+            dist = math.sqrt(dx * dx + dy * dy)
+
+            if dist < threshold and dist < min_dist:
+                min_dist = dist
+                closest = strand
+
+        return closest
+
+    def set_rotate_axis_mode(self, mode):
+        """Set the rotation axis mode (normal/vertical)."""
+        self.rotate_axis_mode = mode
+        print(f"Rotate axis mode: {mode}")
+
+        # Update axis direction if already in rotate mode
+        if self.rotate_mode_active and self.rotate_center is not None:
+            if mode == "vertical":
+                self.rotate_axis_direction = np.array([0.0, 1.0, 0.0])
+            else:
+                azimuth_rad = math.radians(self.camera_azimuth)
+                self.rotate_axis_direction = np.array([
+                    math.cos(azimuth_rad),
+                    0.0,
+                    -math.sin(azimuth_rad)
+                ])
+            self.rotate_axis_end = self.rotate_center + self.rotate_axis_direction * self.ROTATE_ARROW_LENGTH
+            self.update()
+
+    def _screen_to_vertical_plane(self, screen_x, screen_y, reference_point):
+        """Convert screen coordinates to a point on a vertical plane through reference_point."""
+        self.makeCurrent()
+
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+
+        width = self.width()
+        height = self.height() if self.height() > 0 else 1
+        aspect = width / height
+        gluPerspective(45.0, aspect, 0.1, 1000.0)
+
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+
+        azimuth_rad = math.radians(self.camera_azimuth)
+        elevation_rad = math.radians(self.camera_elevation)
+
+        camera_x = self.camera_target[0] + self.camera_distance * math.cos(elevation_rad) * math.sin(azimuth_rad)
+        camera_y = self.camera_target[1] + self.camera_distance * math.sin(elevation_rad)
+        camera_z = self.camera_target[2] + self.camera_distance * math.cos(elevation_rad) * math.cos(azimuth_rad)
+
+        gluLookAt(
+            camera_x, camera_y, camera_z,
+            self.camera_target[0], self.camera_target[1], self.camera_target[2],
+            0.0, 1.0, 0.0
+        )
+
+        viewport = glGetIntegerv(GL_VIEWPORT)
+        modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
+        projection = glGetDoublev(GL_PROJECTION_MATRIX)
+
+        win_y = viewport[3] - screen_y
+
+        result = None
+        try:
+            near_point = gluUnProject(screen_x, win_y, 0.0, modelview, projection, viewport)
+            far_point = gluUnProject(screen_x, win_y, 1.0, modelview, projection, viewport)
+
+            ray_dir = np.array(far_point) - np.array(near_point)
+            ray_origin = np.array(near_point)
+
+            # Create vertical plane through reference point, facing camera
+            plane_normal = np.array([
+                math.sin(azimuth_rad),
+                0,
+                math.cos(azimuth_rad)
+            ])
+
+            # Ray-plane intersection
+            denom = np.dot(ray_dir, plane_normal)
+            if abs(denom) > 1e-6:
+                t = np.dot(np.array(reference_point) - ray_origin, plane_normal) / denom
+                if t >= 0:
+                    result = tuple(ray_origin + t * ray_dir)
+
+        except Exception as e:
+            print(f"Error in _screen_to_vertical_plane: {e}")
+
+        glMatrixMode(GL_MODELVIEW)
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+
+        return result

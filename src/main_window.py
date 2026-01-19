@@ -151,6 +151,12 @@ class MainWindow(QMainWindow):
         self.action_stretch.triggered.connect(lambda: self._set_mode("stretch"))
         toolbar.addAction(self.action_stretch)
 
+        # Rotate mode
+        self.action_rotate = QAction("Rotate", self)
+        self.action_rotate.setCheckable(True)
+        self.action_rotate.triggered.connect(lambda: self._set_mode("rotate"))
+        toolbar.addAction(self.action_rotate)
+
         toolbar.addSeparator()
 
         # Rigid toggle (shows start/end point spheres)
@@ -198,7 +204,8 @@ class MainWindow(QMainWindow):
             self.action_add_strand,
             self.action_attach,
             self.action_move,
-            self.action_stretch
+            self.action_stretch,
+            self.action_rotate
         ]
 
         # Track current project file
@@ -311,6 +318,37 @@ class MainWindow(QMainWindow):
         # Initially hide the stretch toolbar (only show when in stretch mode)
         self.stretch_toolbar.setVisible(False)
 
+        # === Rotate mode options toolbar (new line) ===
+        self.addToolBarBreak()
+        self.rotate_toolbar = QToolBar("Rotate Options")
+        self.rotate_toolbar.setMovable(False)
+        self.addToolBar(self.rotate_toolbar)
+
+        self.rotate_mode_group = QActionGroup(self)
+        self.rotate_mode_group.setExclusive(True)
+
+        self.action_rotate_xz = QAction("Rotate XZ (Normal)", self)
+        self.action_rotate_xz.setCheckable(True)
+        self.action_rotate_xz.setChecked(True)
+        self.action_rotate_xz.triggered.connect(lambda: self._set_rotate_axis_mode("normal"))
+        self.rotate_mode_group.addAction(self.action_rotate_xz)
+        self.rotate_toolbar.addAction(self.action_rotate_xz)
+
+        self.action_rotate_y = QAction("Rotate Y (Vertical)", self)
+        self.action_rotate_y.setCheckable(True)
+        self.action_rotate_y.triggered.connect(lambda: self._set_rotate_axis_mode("vertical"))
+        self.rotate_mode_group.addAction(self.action_rotate_y)
+        self.rotate_toolbar.addAction(self.action_rotate_y)
+
+        self.rotate_toolbar.addSeparator()
+
+        # Info label for rotate mode
+        rotate_info = QLabel("  Click strand to select set, drag handle to set axis, click center to rotate")
+        self.rotate_toolbar.addWidget(rotate_info)
+
+        # Initially hide the rotate toolbar (only show when in rotate mode)
+        self.rotate_toolbar.setVisible(False)
+
     def _setup_statusbar(self):
         """Setup the status bar"""
         self.statusbar = QStatusBar()
@@ -356,9 +394,14 @@ class MainWindow(QMainWindow):
             self.action_move.setChecked(True)
         elif mode == "stretch":
             self.action_stretch.setChecked(True)
+        elif mode == "rotate":
+            self.action_rotate.setChecked(True)
 
         # Show/hide stretch toolbar based on mode
         self.stretch_toolbar.setVisible(mode == "stretch")
+
+        # Show/hide rotate toolbar based on mode
+        self.rotate_toolbar.setVisible(mode == "rotate")
 
         self.canvas.set_mode(mode)
 
@@ -432,6 +475,14 @@ class MainWindow(QMainWindow):
             self.statusbar.showMessage("Stretch executed!", 2000)
         else:
             self.statusbar.showMessage("No endpoint/direction selected", 2000)
+
+    def _set_rotate_axis_mode(self, mode: str):
+        """Set the rotation axis mode (for axis direction selection)."""
+        self.canvas.set_rotate_axis_mode(mode)
+        if mode == "normal":
+            self.statusbar.showMessage("Rotate axis: XZ plane (horizontal)", 2000)
+        elif mode == "vertical":
+            self.statusbar.showMessage("Rotate axis: Y axis (vertical)", 2000)
 
     def _on_mode_changed(self, mode: str):
         """Handle mode change from canvas"""
