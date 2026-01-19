@@ -145,6 +145,12 @@ class MainWindow(QMainWindow):
         self.action_move.triggered.connect(lambda: self._set_mode("move"))
         toolbar.addAction(self.action_move)
 
+        # Stretch mode
+        self.action_stretch = QAction("Stretch", self)
+        self.action_stretch.setCheckable(True)
+        self.action_stretch.triggered.connect(lambda: self._set_mode("stretch"))
+        toolbar.addAction(self.action_stretch)
+
         toolbar.addSeparator()
 
         # Rigid toggle (shows start/end point spheres)
@@ -191,7 +197,8 @@ class MainWindow(QMainWindow):
             self.action_select,
             self.action_add_strand,
             self.action_attach,
-            self.action_move
+            self.action_move,
+            self.action_stretch
         ]
 
         # Track current project file
@@ -265,6 +272,45 @@ class MainWindow(QMainWindow):
         self.attach_mode_group.addAction(self.action_attach_along)
         attach_toolbar.addAction(self.action_attach_along)
 
+        # === Stretch mode options toolbar (new line) ===
+        self.addToolBarBreak()
+        self.stretch_toolbar = QToolBar("Stretch Options")
+        self.stretch_toolbar.setMovable(False)
+        self.addToolBar(self.stretch_toolbar)
+
+        self.stretch_mode_group = QActionGroup(self)
+        self.stretch_mode_group.setExclusive(True)
+
+        self.action_stretch_xz = QAction("Stretch XZ (Normal)", self)
+        self.action_stretch_xz.setCheckable(True)
+        self.action_stretch_xz.setChecked(True)
+        self.action_stretch_xz.triggered.connect(lambda: self._set_stretch_axis_mode("normal"))
+        self.stretch_mode_group.addAction(self.action_stretch_xz)
+        self.stretch_toolbar.addAction(self.action_stretch_xz)
+
+        self.action_stretch_y = QAction("Stretch Y (Vertical)", self)
+        self.action_stretch_y.setCheckable(True)
+        self.action_stretch_y.triggered.connect(lambda: self._set_stretch_axis_mode("vertical"))
+        self.stretch_mode_group.addAction(self.action_stretch_y)
+        self.stretch_toolbar.addAction(self.action_stretch_y)
+
+        self.action_stretch_depth = QAction("Stretch Depth", self)
+        self.action_stretch_depth.setCheckable(True)
+        self.action_stretch_depth.triggered.connect(lambda: self._set_stretch_axis_mode("depth"))
+        self.stretch_mode_group.addAction(self.action_stretch_depth)
+        self.stretch_toolbar.addAction(self.action_stretch_depth)
+
+        self.stretch_toolbar.addSeparator()
+
+        # Go button to execute the stretch
+        self.action_stretch_go = QAction("Go!", self)
+        self.action_stretch_go.setToolTip("Execute stretch in the set direction until collision")
+        self.action_stretch_go.triggered.connect(self._execute_stretch)
+        self.stretch_toolbar.addAction(self.action_stretch_go)
+
+        # Initially hide the stretch toolbar (only show when in stretch mode)
+        self.stretch_toolbar.setVisible(False)
+
     def _setup_statusbar(self):
         """Setup the status bar"""
         self.statusbar = QStatusBar()
@@ -307,6 +353,11 @@ class MainWindow(QMainWindow):
             self.action_attach.setChecked(True)
         elif mode == "move":
             self.action_move.setChecked(True)
+        elif mode == "stretch":
+            self.action_stretch.setChecked(True)
+
+        # Show/hide stretch toolbar based on mode
+        self.stretch_toolbar.setVisible(mode == "stretch")
 
         self.canvas.set_mode(mode)
 
@@ -363,6 +414,23 @@ class MainWindow(QMainWindow):
             self.statusbar.showMessage("Attach mode: Camera depth", 2000)
         elif mode == "along":
             self.statusbar.showMessage("Attach mode: Along other point", 2000)
+
+    def _set_stretch_axis_mode(self, mode: str):
+        """Set the stretch axis mode (for direction selection)."""
+        self.canvas.set_stretch_axis_mode(mode)
+        if mode == "normal":
+            self.statusbar.showMessage("Stretch direction: XZ plane", 2000)
+        elif mode == "vertical":
+            self.statusbar.showMessage("Stretch direction: Y axis", 2000)
+        elif mode == "depth":
+            self.statusbar.showMessage("Stretch direction: Camera depth", 2000)
+
+    def _execute_stretch(self):
+        """Execute the stretch operation."""
+        if self.canvas.execute_stretch():
+            self.statusbar.showMessage("Stretch executed!", 2000)
+        else:
+            self.statusbar.showMessage("No endpoint/direction selected", 2000)
 
     def _on_mode_changed(self, mode: str):
         """Handle mode change from canvas"""
