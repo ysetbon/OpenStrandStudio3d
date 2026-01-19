@@ -1019,7 +1019,12 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self.camera_target += up * dy * pan_speed
 
     def wheelEvent(self, event: QWheelEvent):
-        """Handle mouse wheel for zoom"""
+        """Handle mouse wheel for zoom (or rotation in rotate mode)"""
+        # Check if rotate mode wants to handle this wheel event
+        if self.current_mode == "rotate":
+            if self._rotate_mode_wheel(event):
+                return  # Rotate mode handled it, don't zoom
+
         delta = event.angleDelta().y()
 
         # Zoom in/out

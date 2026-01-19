@@ -30,8 +30,12 @@ class RotateModeMixin:
     ROTATE_ARROW_END_COLOR = (1.0, 0.3, 0.8)  # Magenta at tip
     ROTATE_CENTER_COLOR = (1.0, 1.0, 0.0)  # Yellow for rotation center
     ROTATE_HANDLE_COLOR = (1.0, 0.5, 0.0)  # Orange for draggable handle
+    ROTATE_DISK_COLOR = (0.3, 0.8, 0.4)  # Green for rotation disk
+    ROTATE_DISK_ACTIVE_COLOR = (0.5, 1.0, 0.6)  # Bright green when rotating
     ROTATE_CENTER_RADIUS = 0.15
     ROTATE_HANDLE_RADIUS = 0.12
+    ROTATE_DISK_RADIUS = 0.6  # Radius of the rotation disk
+    ROTATE_DISK_SEGMENTS = 32  # Number of segments for the disk circle
 
     def _init_rotate_mode(self):
         """Initialize rotate mode state variables."""
@@ -42,10 +46,12 @@ class RotateModeMixin:
         self.rotate_axis_direction = None  # Normalized axis direction
         self.rotate_axis_mode = "normal"  # 'normal' (XZ), 'vertical' (Y)
         self.is_editing_rotate_axis = False  # True while editing the axis arrow
-        self.is_rotating = False  # True while performing rotation
+        self.is_rotating = False  # True while performing rotation via disk drag
         self.rotate_initial_positions = {}  # Store original positions for rotation
-        self.rotate_angle = 0.0  # Current rotation angle
-        self.rotate_last_screen_y = None  # For tracking rotation drag
+        self.rotate_angle = 0.0  # Current rotation angle (in radians)
+        self.rotate_total_angle = 0.0  # Total accumulated rotation angle for display
+        self.rotate_last_screen_x = None  # For tracking horizontal drag on disk
+        self.rotate_drag_start_x = None  # Starting X position of drag
 
     def _enter_rotate_mode(self):
         """Called when entering rotate mode."""
@@ -203,6 +209,9 @@ class RotateModeMixin:
 
         glDisable(GL_LIGHTING)
 
+        # Draw rotation disk (perpendicular to axis) - draw first so it's behind
+        self._draw_rotation_disk()
+
         # Draw center sphere (yellow)
         self._draw_rotate_center_sphere()
 
@@ -211,6 +220,9 @@ class RotateModeMixin:
 
         # Draw draggable handle at arrow end
         self._draw_rotate_axis_handle()
+
+        # Draw angle display
+        self._draw_rotation_angle_display()
 
         glEnable(GL_LIGHTING)
 
@@ -313,6 +325,197 @@ class RotateModeMixin:
         glDisable(GL_BLEND)
         glPopMatrix()
 
+    def _draw_rotation_disk(self):
+        """
+        Draw a circular disk/ring perpendicular to the rotation axis.
+        This is the rotation gizmo that users can drag to rotate.
+        """
+        if self.rotate_axis_direction is None:
+            return
+
+        center = self.rotate_center
+        axis = self.rotate_axis_direction
+
+        # Find two perpendicular vectors to the axis for drawing the circle
+        if abs(axis[1]) < 0.9:
+            perp1 = np.cross(axis, np.array([0, 1, 0]))
+        else:
+            perp1 = np.cross(axis, np.array([1, 0, 0]))
+        perp1 = perp1 / np.linalg.norm(perp1)
+
+        perp2 = np.cross(axis, perp1)
+        perp2 = perp2 / np.linalg.norm(perp2)
+
+        # Choose color based on whether we're rotating
+        if self.is_rotating:
+            color = self.ROTATE_DISK_ACTIVE_COLOR
+            line_width = 4.0
+        else:
+            color = self.ROTATE_DISK_COLOR
+            line_width = 3.0
+
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+        # Draw the circular ring
+        glLineWidth(line_width)
+        glColor4f(*color, 0.8)
+        glBegin(GL_LINE_LOOP)
+
+        for i in range(self.ROTATE_DISK_SEGMENTS):
+            angle = 2 * math.pi * i / self.ROTATE_DISK_SEGMENTS
+            point = (center +
+                     perp1 * math.cos(angle) * self.ROTATE_DISK_RADIUS +
+                     perp2 * math.sin(angle) * self.ROTATE_DISK_RADIUS)
+            glVertex3f(point[0], point[1], point[2])
+
+        glEnd()
+
+        # Draw a semi-transparent filled disk for better visibility
+        glColor4f(*color, 0.15)
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(center[0], center[1], center[2])  # Center
+
+        for i in range(self.ROTATE_DISK_SEGMENTS + 1):
+            angle = 2 * math.pi * i / self.ROTATE_DISK_SEGMENTS
+            point = (center +
+                     perp1 * math.cos(angle) * self.ROTATE_DISK_RADIUS +
+                     perp2 * math.sin(angle) * self.ROTATE_DISK_RADIUS)
+            glVertex3f(point[0], point[1], point[2])
+
+        glEnd()
+
+        # Draw small tick marks around the disk for visual feedback
+        glColor4f(*color, 0.6)
+        glLineWidth(2.0)
+        glBegin(GL_LINES)
+
+        for i in range(0, self.ROTATE_DISK_SEGMENTS, 4):  # Every 4th segment
+            angle = 2 * math.pi * i / self.ROTATE_DISK_SEGMENTS
+            inner_point = (center +
+                          perp1 * math.cos(angle) * (self.ROTATE_DISK_RADIUS * 0.85) +
+                          perp2 * math.sin(angle) * (self.ROTATE_DISK_RADIUS * 0.85))
+            outer_point = (center +
+                          perp1 * math.cos(angle) * self.ROTATE_DISK_RADIUS +
+                          perp2 * math.sin(angle) * self.ROTATE_DISK_RADIUS)
+            glVertex3f(inner_point[0], inner_point[1], inner_point[2])
+            glVertex3f(outer_point[0], outer_point[1], outer_point[2])
+
+        glEnd()
+
+        glLineWidth(1.0)
+        glDisable(GL_BLEND)
+
+    def _draw_rotation_angle_display(self):
+        """Draw the current rotation angle as text near the center."""
+        if not self.is_rotating and abs(self.rotate_total_angle) < 0.01:
+            return
+
+        # Convert radians to degrees for display
+        angle_degrees = math.degrees(self.rotate_total_angle)
+
+        # Draw angle arc to show rotation amount
+        if abs(self.rotate_total_angle) > 0.01:
+            self._draw_angle_arc(angle_degrees)
+
+    def _draw_angle_arc(self, angle_degrees):
+        """Draw an arc showing the rotation angle."""
+        if self.rotate_axis_direction is None:
+            return
+
+        center = self.rotate_center
+        axis = self.rotate_axis_direction
+
+        # Find perpendicular vectors
+        if abs(axis[1]) < 0.9:
+            perp1 = np.cross(axis, np.array([0, 1, 0]))
+        else:
+            perp1 = np.cross(axis, np.array([1, 0, 0]))
+        perp1 = perp1 / np.linalg.norm(perp1)
+
+        perp2 = np.cross(axis, perp1)
+        perp2 = perp2 / np.linalg.norm(perp2)
+
+        # Draw arc showing rotation amount
+        arc_radius = self.ROTATE_DISK_RADIUS * 0.5
+        angle_radians = math.radians(angle_degrees)
+
+        # Determine arc direction and color
+        if angle_degrees >= 0:
+            glColor4f(0.2, 1.0, 0.2, 0.8)  # Green for positive
+        else:
+            glColor4f(1.0, 0.2, 0.2, 0.8)  # Red for negative
+
+        glLineWidth(4.0)
+        glBegin(GL_LINE_STRIP)
+
+        # Draw arc from 0 to current angle
+        num_arc_segments = max(3, int(abs(angle_degrees) / 5))
+        for i in range(num_arc_segments + 1):
+            t = i / num_arc_segments
+            current_angle = t * angle_radians
+            point = (center +
+                     perp1 * math.cos(current_angle) * arc_radius +
+                     perp2 * math.sin(current_angle) * arc_radius)
+            glVertex3f(point[0], point[1], point[2])
+
+        glEnd()
+
+        # Draw line from center to arc start (reference line)
+        glColor4f(1.0, 1.0, 1.0, 0.5)
+        glLineWidth(2.0)
+        glBegin(GL_LINES)
+        start_point = center + perp1 * arc_radius
+        glVertex3f(center[0], center[1], center[2])
+        glVertex3f(start_point[0], start_point[1], start_point[2])
+        glEnd()
+
+        glLineWidth(1.0)
+
+    def _is_clicking_rotation_disk(self, screen_x, screen_y):
+        """Check if clicking on or near the rotation disk."""
+        if self.rotate_center is None:
+            return False
+
+        # Project center to screen
+        center_screen = self._project_point_to_screen(self.rotate_center)
+        if center_screen is None:
+            return False
+
+        # Calculate screen distance from center
+        dx = screen_x - center_screen[0]
+        dy = screen_y - center_screen[1]
+        screen_dist = math.sqrt(dx * dx + dy * dy)
+
+        # Estimate disk radius on screen (approximate)
+        # Project a point on the disk edge to get screen radius
+        if self.rotate_axis_direction is not None:
+            axis = self.rotate_axis_direction
+            if abs(axis[1]) < 0.9:
+                perp = np.cross(axis, np.array([0, 1, 0]))
+            else:
+                perp = np.cross(axis, np.array([1, 0, 0]))
+            perp = perp / np.linalg.norm(perp)
+
+            edge_point = self.rotate_center + perp * self.ROTATE_DISK_RADIUS
+            edge_screen = self._project_point_to_screen(edge_point)
+
+            if edge_screen:
+                screen_radius = math.sqrt(
+                    (edge_screen[0] - center_screen[0]) ** 2 +
+                    (edge_screen[1] - center_screen[1]) ** 2
+                )
+
+                # Click is on disk if within radius + some tolerance
+                # But not too close to center (that's for the handle)
+                inner_threshold = screen_radius * 0.3
+                outer_threshold = screen_radius * 1.3
+
+                return inner_threshold < screen_dist < outer_threshold
+
+        # Fallback: fixed pixel threshold
+        return 30 < screen_dist < 80
+
     def _rotate_mode_mouse_press(self, event):
         """Handle mouse press in rotate mode."""
         screen_x = event.x()
@@ -330,16 +533,17 @@ class RotateModeMixin:
                     return True
             return False
 
-        # Check if clicking on the axis handle to edit it
+        # Check if clicking on the axis handle to edit it (FIRST priority)
         if self._is_clicking_rotate_handle(screen_x, screen_y):
             self.is_editing_rotate_axis = True
+            self.is_rotating = False  # Make sure we're not in rotation mode
             print("Rotate: Editing axis direction")
             self.update()
             return True
 
-        # Check if clicking on the center to start rotation
-        if self._is_clicking_rotate_center(screen_x, screen_y):
-            self._start_rotation(screen_y)
+        # Check if clicking on the rotation disk to start rotation (SECOND priority)
+        if self._is_clicking_rotation_disk(screen_x, screen_y):
+            self._start_disk_rotation(screen_x)
             return True
 
         # Click elsewhere - deselect
@@ -347,8 +551,25 @@ class RotateModeMixin:
         self.rotate_selected_set = None
         self.rotate_center = None
         self.rotate_axis_end = None
+        self.rotate_total_angle = 0.0
         self.update()
         return False
+
+    def _start_disk_rotation(self, screen_x):
+        """Start rotation via disk drag."""
+        if not self.rotate_mode_active or self.rotate_selected_set is None:
+            return
+
+        # Save state for undo
+        if hasattr(self, 'undo_redo_manager') and self.undo_redo_manager:
+            self.undo_redo_manager.save_state()
+
+        self.is_rotating = True
+        self.is_editing_rotate_axis = False  # Make sure we're not editing axis
+        self.rotate_angle = 0.0
+        self.rotate_last_screen_x = screen_x
+        self.rotate_drag_start_x = screen_x
+        print("Rotate: Started disk rotation - drag left/right to rotate")
 
     def _is_clicking_rotate_handle(self, screen_x, screen_y):
         """Check if clicking on the axis arrow handle."""
@@ -399,17 +620,41 @@ class RotateModeMixin:
         screen_x = event.x()
         screen_y = event.y()
 
+        # IMPORTANT: These are mutually exclusive operations
+        # Once you start one, you can't switch to the other until mouse release
+
         if self.is_editing_rotate_axis:
             # Update axis direction based on mouse position
             self._update_rotate_axis(screen_x, screen_y)
             return True
 
         if self.is_rotating:
-            # Perform rotation based on mouse Y movement
-            self._update_rotation(screen_y)
+            # Perform rotation based on horizontal (left/right) mouse movement
+            self._update_disk_rotation(screen_x)
             return True
 
         return False
+
+    def _update_disk_rotation(self, screen_x):
+        """Update rotation based on horizontal mouse movement (dragging left/right on disk)."""
+        if self.rotate_last_screen_x is None:
+            self.rotate_last_screen_x = screen_x
+            return
+
+        screen_dx = screen_x - self.rotate_last_screen_x
+        self.rotate_last_screen_x = screen_x
+
+        # Convert horizontal screen movement to angle
+        # Dragging right = positive rotation, left = negative
+        angle_speed = 0.01  # Radians per pixel
+        angle_delta = screen_dx * angle_speed
+
+        self.rotate_angle += angle_delta
+        self.rotate_total_angle += angle_delta
+
+        # Apply rotation to all strands in the group
+        self._apply_rotation()
+        self.update()
 
     def _update_rotate_axis(self, screen_x, screen_y):
         """
@@ -564,8 +809,9 @@ class RotateModeMixin:
 
         if self.is_rotating:
             self.is_rotating = False
-            self.rotate_last_screen_y = None
-            # Reset initial positions for next rotation
+            self.rotate_last_screen_x = None
+            self.rotate_drag_start_x = None
+            # Reset initial positions for next rotation (keep current positions as new base)
             if self.rotate_selected_set:
                 set_prefix = f"{self.rotate_selected_set}_"
                 group_strands = [s for s in self.strands if s.name.startswith(set_prefix)]
@@ -577,11 +823,76 @@ class RotateModeMixin:
                         'cp2': strand.control_point2.copy()
                     }
             self.rotate_angle = 0.0
-            print(f"Rotate: Rotation completed")
+            angle_degrees = math.degrees(self.rotate_total_angle)
+            print(f"Rotate: Rotation completed (total: {angle_degrees:.1f}°)")
             self.update()
             return True
 
         return False
+
+    def _rotate_mode_wheel(self, event):
+        """
+        Handle mouse wheel for rotation.
+        Scroll up = rotate positive, scroll down = rotate negative.
+        """
+        if not self.rotate_mode_active or self.rotate_selected_set is None:
+            return False
+
+        # Check if mouse is over the rotation area (center or disk)
+        screen_x = event.x()
+        screen_y = event.y()
+
+        is_over_disk = self._is_clicking_rotation_disk(screen_x, screen_y)
+        is_over_center = self._is_clicking_rotate_center(screen_x, screen_y)
+
+        if not is_over_disk and not is_over_center:
+            return False  # Let normal wheel handling occur
+
+        # Don't allow wheel rotation while dragging axis
+        if self.is_editing_rotate_axis:
+            return False
+
+        # Save state for undo (only on first wheel movement of a sequence)
+        if hasattr(self, 'undo_redo_manager') and self.undo_redo_manager:
+            # Only save state if we haven't saved recently
+            if not hasattr(self, '_wheel_undo_saved') or not self._wheel_undo_saved:
+                self.undo_redo_manager.save_state()
+                self._wheel_undo_saved = True
+
+        # Get wheel delta
+        delta = event.angleDelta().y()
+
+        # Convert wheel delta to rotation angle
+        # Typical delta is 120 per notch, we want small increments
+        angle_per_notch = math.radians(5)  # 5 degrees per notch
+        angle_delta = (delta / 120.0) * angle_per_notch
+
+        self.rotate_angle += angle_delta
+        self.rotate_total_angle += angle_delta
+
+        # Apply rotation
+        self._apply_rotation()
+
+        # Update initial positions after wheel rotation
+        if self.rotate_selected_set:
+            set_prefix = f"{self.rotate_selected_set}_"
+            group_strands = [s for s in self.strands if s.name.startswith(set_prefix)]
+            for strand in group_strands:
+                self.rotate_initial_positions[strand.name] = {
+                    'start': strand.start.copy(),
+                    'end': strand.end.copy(),
+                    'cp1': strand.control_point1.copy(),
+                    'cp2': strand.control_point2.copy()
+                }
+        self.rotate_angle = 0.0
+
+        self.update()
+        return True
+
+    def _rotate_mode_wheel_end(self):
+        """Called when wheel scrolling stops (for undo state management)."""
+        if hasattr(self, '_wheel_undo_saved'):
+            self._wheel_undo_saved = False
 
     def _get_strand_at_screen_pos(self, screen_x, screen_y):
         """Find a strand near the given screen position."""
