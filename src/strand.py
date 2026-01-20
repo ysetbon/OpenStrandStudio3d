@@ -1102,12 +1102,18 @@ class Strand:
                     attached.sync_cp1_with_parent(delta)
 
     def set_start(self, position):
-        """Set the start position"""
-        delta = np.array(position, dtype=float) - self.start
-        self.start = np.array(position, dtype=float)
+        """Set the start position (2D-style: only move control points if coincident)"""
+        old_start = self.start.copy()
+        new_start = np.array(position, dtype=float)
 
-        # Move control point 1 with start
-        self.control_point1 += delta
+        # Only move control points if they coincide with the current start point
+        # (matches 2D behavior from openstrand_1_106)
+        if np.allclose(self.control_point1, old_start, atol=1e-6):
+            self.control_point1 = new_start.copy()
+        if np.allclose(self.control_point2, old_start, atol=1e-6):
+            self.control_point2 = new_start.copy()
+
+        self.start = new_start
         self._mark_geometry_dirty()
 
         # Update attached strands at start (attachment_side == 0)
@@ -1119,12 +1125,18 @@ class Strand:
                     attached.sync_cp1_with_parent()
 
     def set_end(self, position):
-        """Set the end position"""
-        delta = np.array(position, dtype=float) - self.end
-        self.end = np.array(position, dtype=float)
+        """Set the end position (2D-style: only move control points if coincident)"""
+        old_end = self.end.copy()
+        new_end = np.array(position, dtype=float)
 
-        # Move control point 2 with end
-        self.control_point2 += delta
+        # Only move control points if they coincide with the current end point
+        # (matches 2D behavior from openstrand_1_106)
+        if np.allclose(self.control_point1, old_end, atol=1e-6):
+            self.control_point1 = new_end.copy()
+        if np.allclose(self.control_point2, old_end, atol=1e-6):
+            self.control_point2 = new_end.copy()
+
+        self.end = new_end
         self._mark_geometry_dirty()
 
         # Update attached strands at end (attachment_side == 1)

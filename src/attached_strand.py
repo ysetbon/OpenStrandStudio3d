@@ -191,6 +191,7 @@ class AttachedStrand(Strand):
     def set_end(self, position):
         """
         Set the end position with minimum length constraint.
+        (2D-style: only move control points if coincident)
 
         Args:
             position: New end position as numpy array
@@ -210,10 +211,16 @@ class AttachedStrand(Strand):
                 direction = self._get_default_direction(self.parent_strand, self.attachment_side)
             position = self.start + direction * self.min_length
 
-        # Update end and control point 2
-        delta = position - self.end
+        old_end = self.end.copy()
+
+        # Only move control points if they coincide with the current end point
+        # (matches 2D behavior from openstrand_1_106)
+        if np.allclose(self.control_point1, old_end, atol=1e-6):
+            self.control_point1 = position.copy()
+        if np.allclose(self.control_point2, old_end, atol=1e-6):
+            self.control_point2 = position.copy()
+
         self.end = position
-        self.control_point2 = self.control_point2 + delta
         self._mark_geometry_dirty()
 
     def get_angle(self):

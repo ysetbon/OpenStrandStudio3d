@@ -556,15 +556,26 @@ class MoveModeMixin:
             self.move_start_pos = current_pos
 
         # Apply delta to the appropriate point and propagate to connected strands
+        # (2D-style: save and restore non-moving endpoints to prevent drift)
         if self.moving_control_point == 'start':
+            # Save non-moving endpoint before modification
+            original_end = strand.end.copy()
             strand.set_start(strand.start + delta)
+            # Restore non-moving endpoint (matches 2D behavior)
+            strand.end = original_end
+            strand._mark_geometry_dirty()
             # Propagate to connected strand at start
             self._move_connected_strands(strand, 'start', delta)
             # In straight mode, re-straighten the strand after movement
             if self.straight_segment_mode:
                 strand.make_straight()
         elif self.moving_control_point == 'end':
+            # Save non-moving endpoint before modification
+            original_start = strand.start.copy()
             strand.set_end(strand.end + delta)
+            # Restore non-moving endpoint (matches 2D behavior)
+            strand.start = original_start
+            strand._mark_geometry_dirty()
             # Propagate to connected strand at end
             self._move_connected_strands(strand, 'end', delta)
             # In straight mode, re-straighten the strand after movement
@@ -599,6 +610,7 @@ class MoveModeMixin:
     def _move_connected_strands(self, strand, endpoint, delta):
         """
         Move strands that are connected to the given endpoint.
+        (2D-style: save/restore non-moving endpoints)
 
         Based on layer_state_manager connection logic:
         - If this is an AttachedStrand and we're moving its START, move the parent's connected endpoint
@@ -618,10 +630,14 @@ class MoveModeMixin:
                 parent = strand.parent_strand
                 attachment_side = strand.attachment_side
 
-                # Move the parent's connected endpoint
+                # Move the parent's connected endpoint (2D-style with save/restore)
                 if attachment_side == 0:
-                    # Connected to parent's start
+                    # Connected to parent's start - save parent's end before modifying
+                    original_parent_end = parent.end.copy()
                     parent.set_start(parent.start + delta)
+                    # Restore parent's non-moving endpoint
+                    parent.end = original_parent_end
+                    parent._mark_geometry_dirty()
                     if hasattr(self, "_add_drag_lod_target"):
                         self._add_drag_lod_target(parent)
                     # In straight mode, re-straighten parent
@@ -630,8 +646,12 @@ class MoveModeMixin:
                     # Also propagate to anything else connected to parent's start
                     self._propagate_to_attached_strands(parent, 0, delta, exclude=strand)
                 else:
-                    # Connected to parent's end
+                    # Connected to parent's end - save parent's start before modifying
+                    original_parent_start = parent.start.copy()
                     parent.set_end(parent.end + delta)
+                    # Restore parent's non-moving endpoint
+                    parent.start = original_parent_start
+                    parent._mark_geometry_dirty()
                     if hasattr(self, "_add_drag_lod_target"):
                         self._add_drag_lod_target(parent)
                     # In straight mode, re-straighten parent
@@ -652,7 +672,8 @@ class MoveModeMixin:
 
     def _propagate_to_attached_strands(self, parent_strand, side, delta, exclude=None):
         """
-        Move all attached strands connected to the given side of parent_strand.
+        Move attached strands' connection points to match parent's moved endpoint.
+        (2D-style: only move the connection point, not the whole strand)
 
         Args:
             parent_strand: The parent strand
@@ -660,20 +681,32 @@ class MoveModeMixin:
             delta: Movement delta
             exclude: Strand to exclude (to prevent infinite recursion)
         """
+        # Get the new position of parent's attachment point
+        if side == 0:
+            new_attach_pos = parent_strand.start.copy()
+        else:
+            new_attach_pos = parent_strand.end.copy()
+
         for attached in parent_strand.attached_strands:
             if attached == exclude:
                 continue
 
             if hasattr(attached, 'attachment_side') and attached.attachment_side == side:
                 # This attached strand is connected at this side
-                # Move its start point (attached strands connect via their start)
-                attached.start = attached.start + delta
-                attached.control_point1 = attached.control_point1 + delta
+                # 2D-style: Only move connection point (start) to match parent
+                # Do NOT move the rest of the strand (end stays in place)
+                old_start = attached.start.copy()
 
-                # Also move its end and cp2 to maintain shape (whole strand moves)
-                attached.end = attached.end + delta
-                attached.control_point2 = attached.control_point2 + delta
+                # Only move control points if they coincide with the old start
+                if np.allclose(attached.control_point1, old_start, atol=1e-6):
+                    attached.control_point1 = new_attach_pos.copy()
+                if np.allclose(attached.control_point2, old_start, atol=1e-6):
+                    attached.control_point2 = new_attach_pos.copy()
+
+                # Move only the start point to match parent's attachment point
+                attached.start = new_attach_pos.copy()
                 attached._mark_geometry_dirty()
+
                 if hasattr(self, "_add_drag_lod_target"):
                     self._add_drag_lod_target(attached)
 
