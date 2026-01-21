@@ -19,9 +19,10 @@ from attach_mode import AttachModeMixin
 from rotate_group_strand import RotateGroupStrandMixin
 from stretch_mode import StretchModeMixin
 from rotate_mode import RotateModeMixin
+from angle_adjust_mode import AngleAdjustModeMixin
 
 
-class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachModeMixin, RotateGroupStrandMixin, StretchModeMixin, RotateModeMixin):
+class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachModeMixin, RotateGroupStrandMixin, StretchModeMixin, RotateModeMixin, AngleAdjustModeMixin):
     """3D OpenGL canvas for strand visualization and manipulation"""
 
     # Signals
@@ -82,6 +83,9 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
 
         # Rotate mode state (new style - with visual arrow)
         self._init_rotate_mode()
+
+        # Angle adjust mode state
+        self._init_angle_adjust_mode()
 
         # Rigid mode state - shows start/end point spheres
         self.show_rigid_points = False

@@ -157,6 +157,12 @@ class MainWindow(QMainWindow):
         self.action_rotate.triggered.connect(lambda: self._set_mode("rotate"))
         toolbar.addAction(self.action_rotate)
 
+        # Angle Adjust mode
+        self.action_angle_adjust = QAction("Angle/Length", self)
+        self.action_angle_adjust.setCheckable(True)
+        self.action_angle_adjust.triggered.connect(self._activate_angle_adjust)
+        toolbar.addAction(self.action_angle_adjust)
+
         toolbar.addSeparator()
 
         # Rigid toggle (shows start/end point spheres)
@@ -205,7 +211,8 @@ class MainWindow(QMainWindow):
             self.action_attach,
             self.action_move,
             self.action_stretch,
-            self.action_rotate
+            self.action_rotate,
+            self.action_angle_adjust
         ]
 
         # Track current project file
@@ -432,6 +439,20 @@ class MainWindow(QMainWindow):
             self.statusbar.showMessage("Straight segment mode: ON - strands are now straight lines", 3000)
         else:
             self.statusbar.showMessage("Straight segment mode: OFF - curves restored", 3000)
+
+    def _activate_angle_adjust(self):
+        """Activate angle/length adjust mode for the selected strand"""
+        # Uncheck the button after click (it's a one-shot action, not a mode)
+        self.action_angle_adjust.setChecked(False)
+
+        # Check if a strand is selected
+        if self.canvas.selected_strand is None:
+            self.statusbar.showMessage("Please select a strand first", 3000)
+            return
+
+        # Activate angle adjust mode on the canvas
+        self.canvas.activate_angle_adjust_mode(self.canvas.selected_strand)
+        self.statusbar.showMessage("Adjusting angle and length...", 2000)
 
     def _set_move_axis_mode(self, mode: str):
         """Set the move axis mode and switch to move mode."""

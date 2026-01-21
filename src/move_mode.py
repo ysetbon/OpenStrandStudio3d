@@ -630,14 +630,22 @@ class MoveModeMixin:
                 parent = strand.parent_strand
                 attachment_side = strand.attachment_side
 
-                # Move the parent's connected endpoint (2D-style with save/restore)
+                # Move the parent's connected endpoint DIRECTLY (not via set_start/set_end)
+                # to avoid triggering update_start_from_parent on the strand we're moving
                 if attachment_side == 0:
-                    # Connected to parent's start - save parent's end before modifying
-                    original_parent_end = parent.end.copy()
-                    parent.set_start(parent.start + delta)
-                    # Restore parent's non-moving endpoint
-                    parent.end = original_parent_end
+                    # Connected to parent's start
+                    old_parent_start = parent.start.copy()
+                    new_parent_start = parent.start + delta
+
+                    # Only move control points if they coincide with the old start
+                    if np.allclose(parent.control_point1, old_parent_start, atol=1e-6):
+                        parent.control_point1 = new_parent_start.copy()
+                    if np.allclose(parent.control_point2, old_parent_start, atol=1e-6):
+                        parent.control_point2 = new_parent_start.copy()
+
+                    parent.start = new_parent_start
                     parent._mark_geometry_dirty()
+
                     if hasattr(self, "_add_drag_lod_target"):
                         self._add_drag_lod_target(parent)
                     # In straight mode, re-straighten parent
@@ -646,12 +654,19 @@ class MoveModeMixin:
                     # Also propagate to anything else connected to parent's start
                     self._propagate_to_attached_strands(parent, 0, delta, exclude=strand)
                 else:
-                    # Connected to parent's end - save parent's start before modifying
-                    original_parent_start = parent.start.copy()
-                    parent.set_end(parent.end + delta)
-                    # Restore parent's non-moving endpoint
-                    parent.start = original_parent_start
+                    # Connected to parent's end
+                    old_parent_end = parent.end.copy()
+                    new_parent_end = parent.end + delta
+
+                    # Only move control points if they coincide with the old end
+                    if np.allclose(parent.control_point1, old_parent_end, atol=1e-6):
+                        parent.control_point1 = new_parent_end.copy()
+                    if np.allclose(parent.control_point2, old_parent_end, atol=1e-6):
+                        parent.control_point2 = new_parent_end.copy()
+
+                    parent.end = new_parent_end
                     parent._mark_geometry_dirty()
+
                     if hasattr(self, "_add_drag_lod_target"):
                         self._add_drag_lod_target(parent)
                     # In straight mode, re-straighten parent
