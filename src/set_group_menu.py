@@ -16,6 +16,13 @@ def build_set_group_menu(parent, on_duplicate, on_rotate):
             border: 1px solid #555555;
             padding: 4px;
         }
+        QMenu::item {
+            padding: 6px 18px;
+            background-color: transparent;
+        }
+        QMenu::item:selected {
+            background-color: #3a3a3a;
+        }
         QMenu::separator {
             height: 1px;
             background-color: #555555;

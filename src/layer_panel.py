@@ -6,7 +6,7 @@ UI panel for managing strand layers with collapsible set groups
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
     QPushButton, QLabel, QFrame, QColorDialog, QMenu,
-    QWidgetAction, QSizePolicy
+    QWidgetAction, QSizePolicy, QDialogButtonBox, QAbstractSpinBox
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QColor, QPalette
@@ -154,7 +154,7 @@ class HoverLabel(QLabel):
         if self._hovered:
             self.setStyleSheet("""
                 QLabel {
-                    background-color: #4a90d9;
+                    background-color: #3a3a3a;
                     color: white;
                     padding: 4px 8px;
                     border-radius: 2px;
@@ -326,27 +326,39 @@ class LayerButton(QPushButton):
                 background-color: #3c3c3c;
                 color: #e0e0e0;
             }
+            QColorDialog QDialogButtonBox {
+                background-color: #3c3c3c;
+            }
             QColorDialog QPushButton {
-                background-color: #505050;
+                background-color: #3c3c3c;
                 color: #e0e0e0;
                 border: 1px solid #606060;
                 border-radius: 4px;
                 padding: 6px 16px;
                 min-width: 70px;
             }
+            QColorDialog QDialogButtonBox QPushButton {
+                background-color: #3c3c3c;
+                border: 1px solid #606060;
+            }
             QColorDialog QPushButton:hover {
-                background-color: #606060;
+                background-color: #4a4a4a;
                 border: 1px solid #707070;
             }
             QColorDialog QPushButton:pressed {
-                background-color: #404040;
+                background-color: #2f2f2f;
             }
             QColorDialog QPushButton:default {
-                background-color: #4080c0;
-                border: 1px solid #5090d0;
+                background-color: #3c3c3c;
+                border: 1px solid #808080;
+                color: #e0e0e0;
             }
             QColorDialog QPushButton:default:hover {
-                background-color: #5090d0;
+                background-color: #4a4a4a;
+                border: 1px solid #8a8a8a;
+            }
+            QColorDialog QPushButton:focus {
+                outline: none;
             }
             QColorDialog QLineEdit {
                 background-color: #2a2a2a;
@@ -355,11 +367,31 @@ class LayerButton(QPushButton):
                 padding: 4px;
                 border-radius: 2px;
             }
-            QColorDialog QSpinBox {
+            QColorDialog QAbstractSpinBox {
                 background-color: #2a2a2a;
                 color: #e0e0e0;
                 border: 1px solid #555555;
                 border-radius: 2px;
+                padding: 2px 4px;
+            }
+            QColorDialog QAbstractSpinBox::up-button,
+            QColorDialog QAbstractSpinBox::down-button {
+                background-color: #2a2a2a;
+                border-left: 1px solid #555555;
+                width: 14px;
+            }
+            QColorDialog QAbstractSpinBox::up-button:hover,
+            QColorDialog QAbstractSpinBox::down-button:hover {
+                background-color: #3a3a3a;
+            }
+            QColorDialog QAbstractSpinBox::lineedit {
+                background-color: #2a2a2a;
+                color: #e0e0e0;
+            }
+            QColorDialog QAbstractSpinBox::up-arrow,
+            QColorDialog QAbstractSpinBox::down-arrow {
+                width: 7px;
+                height: 7px;
             }
             QColorDialog QLabel {
                 color: #e0e0e0;
@@ -376,7 +408,18 @@ class LayerButton(QPushButton):
                 margin: -4px 0;
                 border-radius: 7px;
             }
+            QColorDialog QSlider::sub-page:horizontal {
+                background-color: #3a3a3a;
+                border-radius: 3px;
+            }
+            QColorDialog QSlider::add-page:horizontal {
+                background-color: #2a2a2a;
+                border-radius: 3px;
+            }
         """)
+        self._force_color_dialog_button_style(color_dialog)
+        self._force_color_dialog_spinbox_style(color_dialog)
+        self._force_color_dialog_alpha_label_style(color_dialog)
 
         if color_dialog.exec_() == QColorDialog.Accepted:
             color = color_dialog.currentColor()
@@ -384,6 +427,104 @@ class LayerButton(QPushButton):
                 # Include alpha in the color tuple
                 new_color = (color.redF(), color.greenF(), color.blueF(), color.alphaF())
                 self.set_color(new_color)
+
+    def _force_color_dialog_button_style(self, color_dialog):
+        """Force dialog button styling for native button overrides."""
+        button_box = color_dialog.findChild(QDialogButtonBox)
+        if not button_box:
+            return
+
+        button_style = """
+            QPushButton {
+                background-color: #3c3c3c;
+                color: #e0e0e0;
+                border: 1px solid #606060;
+                border-radius: 4px;
+                padding: 6px 16px;
+                min-width: 70px;
+            }
+            QPushButton:hover {
+                background-color: #4a4a4a;
+                border: 1px solid #707070;
+            }
+            QPushButton:pressed {
+                background-color: #2f2f2f;
+            }
+            QPushButton:default {
+                background-color: #3c3c3c;
+                border: 1px solid #808080;
+                color: #e0e0e0;
+            }
+            QPushButton:default:hover {
+                background-color: #4a4a4a;
+                border: 1px solid #8a8a8a;
+            }
+            QPushButton:focus {
+                outline: none;
+            }
+        """
+        for button in button_box.buttons():
+            button.setStyleSheet(button_style)
+
+    def _force_color_dialog_spinbox_style(self, color_dialog):
+        """Force spinbox styling so alpha matches HSV/RGB fields."""
+        spinbox_style = """
+            QAbstractSpinBox {
+                background-color: #2a2a2a;
+                color: #e0e0e0;
+                border: 1px solid #555555;
+                border-radius: 2px;
+                padding: 2px 4px;
+            }
+            QAbstractSpinBox::lineedit {
+                background-color: #2a2a2a;
+                color: #e0e0e0;
+            }
+            QAbstractSpinBox::up-button,
+            QAbstractSpinBox::down-button {
+                background-color: #2a2a2a;
+                border-left: 1px solid #555555;
+                width: 14px;
+            }
+            QAbstractSpinBox::up-button:hover,
+            QAbstractSpinBox::down-button:hover {
+                background-color: #3a3a3a;
+            }
+            QAbstractSpinBox::up-arrow,
+            QAbstractSpinBox::down-arrow {
+                width: 7px;
+                height: 7px;
+            }
+        """
+        for spinbox in color_dialog.findChildren(QAbstractSpinBox):
+            spinbox.setStyleSheet(spinbox_style)
+
+    def _force_color_dialog_alpha_label_style(self, color_dialog):
+        """Force alpha label background to match the dialog theme."""
+        alpha_label = None
+        for label in color_dialog.findChildren(QLabel):
+            if "lpha" in label.text().lower():
+                alpha_label = label
+                break
+
+        if not alpha_label:
+            return
+
+        alpha_label.setStyleSheet("""
+            QLabel {
+                background-color: #3c3c3c;
+                color: #e0e0e0;
+            }
+        """)
+
+        parent = alpha_label.parent()
+        if not parent:
+            return
+
+        for frame in parent.findChildren(QFrame):
+            if frame.geometry() == alpha_label.geometry():
+                frame.setStyleSheet("background-color: #3c3c3c; border: none;")
+                break
 
     def _request_delete(self):
         """Request deletion of this strand"""
