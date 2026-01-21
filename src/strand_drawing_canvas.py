@@ -269,6 +269,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         # Move mode: shows CPs only for selected strand with boxes
         self._draw_control_points()
 
+        # Draw twist drag UI overlay if twisting (from MoveModeMixin)
+        if self.current_mode == "move" and self._is_twist_dragging():
+            self._draw_twist_drag_ui()
+
         # Draw attachment points in attach mode (from AttachModeMixin)
         if self.current_mode == "attach":
             self._draw_attachment_points()
@@ -768,11 +772,16 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                 self._try_select_strand(event.x(), event.y())
 
             elif self.current_mode == "move":
-                # Start moving selected strand or control point (from MoveModeMixin)
-                self._start_move(event.x(), event.y())
-                self._last_move_frame_time = 0.0
-                self._reset_drag_lod_targets()
-                self._add_drag_lod_target(self.moving_strand)
+                # First check if clicking on a twist ring (from MoveModeMixin)
+                if self._start_twist_drag(event.x(), event.y()):
+                    # Started twist drag - don't start move
+                    pass
+                else:
+                    # Start moving selected strand or control point (from MoveModeMixin)
+                    self._start_move(event.x(), event.y())
+                    self._last_move_frame_time = 0.0
+                    self._reset_drag_lod_targets()
+                    self._add_drag_lod_target(self.moving_strand)
 
             elif self.current_mode == "attach":
                 # Start attaching a new strand (from AttachModeMixin)
@@ -810,10 +819,14 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                 # End rotation operation (from RotateGroupStrandMixin)
                 self.end_rotate_group_strand()
 
-            elif self.current_mode == "move" and self.moving_strand:
-                # End move operation (from MoveModeMixin)
-                self._end_move()
-                self._reset_drag_lod_targets()
+            elif self.current_mode == "move":
+                # Check if twist dragging first
+                if self._is_twist_dragging():
+                    self._end_twist_drag()
+                elif self.moving_strand:
+                    # End move operation (from MoveModeMixin)
+                    self._end_move()
+                    self._reset_drag_lod_targets()
 
             elif self.current_mode == "attach" and self.attaching:
                 # Finish attachment (from AttachModeMixin)
@@ -881,12 +894,16 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                     # Shift key determines axis mode: normal (XZ) or vertical (Y)
                     axis_mode = "vertical" if shift_held else "normal"
                     self.update_rotate_group_strand(event.x(), event.y(), axis_mode=axis_mode)
-                elif self.current_mode == "move" and self.moving_strand:
-                    if self._should_process_move_frame():
-                        # Update move - use selected move axis mode
-                        self._update_move(event.x(), event.y(), axis_mode=self.move_axis_mode)
-                    else:
-                        update_needed = False
+                elif self.current_mode == "move":
+                    if self._is_twist_dragging():
+                        # Update twist drag (from MoveModeMixin)
+                        self._update_twist_drag(event.x(), event.y())
+                    elif self.moving_strand:
+                        if self._should_process_move_frame():
+                            # Update move - use selected move axis mode
+                            self._update_move(event.x(), event.y(), axis_mode=self.move_axis_mode)
+                        else:
+                            update_needed = False
                 elif self.current_mode == "attach" and self.attaching:
                     if self._should_process_attach_frame():
                         # Update attached strand end position (from AttachModeMixin)

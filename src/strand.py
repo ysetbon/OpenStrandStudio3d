@@ -55,6 +55,13 @@ class Strand:
         self.tube_segments = 40  # Segments around circumference (balanced for speed/quality)
         self.curve_segments = 56  # Segments along curve length for smoother bends
 
+        # Twist angles (in degrees) - controls rotation of the flat cross-section
+        # These allow the strand surface to rotate/twist along its length
+        self.start_twist = 0.0      # Twist angle at start point
+        self.end_twist = 0.0        # Twist angle at end point
+        self.cp1_twist = 0.0        # Twist angle at control point 1
+        self.cp2_twist = 0.0        # Twist angle at control point 2
+
         # Selection/highlight state
         self.is_selected = False
         self.is_hovered = False
@@ -198,7 +205,12 @@ class Strand:
         if cached and cached[0] == self._geom_version:
             return points, cached[1]
 
+        # Compute parallel transport frames
         frames = self._compute_parallel_frames(points)
+
+        # Apply twist rotation to frames based on twist angles
+        frames = self._apply_twist_to_frames(frames, points)
+
         self._frame_cache[num_segments] = (self._geom_version, frames)
         return points, frames
 
@@ -399,12 +411,90 @@ class Strand:
                 all_points.extend(points[1:])
 
         frames = self._compute_chain_frames(all_points)
+
+        # Apply twist to the chain frames based on each strand's twist values
+        frames = self._apply_chain_twist(chain, all_points, frames, curve_segments)
+
         self._chain_cache[key] = (all_points, frames)
 
         if len(self._chain_cache) > 8:
             self._chain_cache.clear()
 
         return all_points, frames
+
+    def _apply_chain_twist(self, chain, all_points, frames, curve_segments):
+        """
+        Apply twist to chain frames based on each strand's twist values.
+
+        For chains with multiple strands, each strand section gets its own
+        twist interpolation applied.
+
+        Args:
+            chain: List of strands in the chain
+            all_points: All curve points for the chain
+            frames: Parallel transport frames for all points
+            curve_segments: Number of segments per strand
+
+        Returns:
+            New list of (right, up) tuples with twist applied
+        """
+        if len(frames) < 2 or not chain:
+            return frames
+
+        twisted_frames = []
+        point_index = 0
+
+        for strand_idx, strand in enumerate(chain):
+            # Calculate how many points this strand contributes
+            if strand_idx == 0:
+                strand_point_count = curve_segments + 1
+            else:
+                strand_point_count = curve_segments  # First point shared with previous
+
+            # Apply twist to each point in this strand's section
+            for i in range(strand_point_count):
+                if point_index >= len(frames):
+                    break
+
+                # Calculate t parameter for this point within the strand (0 to 1)
+                t = i / curve_segments if curve_segments > 0 else 0.0
+
+                # Get twist angle at this point using strand's twist values
+                twist_deg = strand.get_twist_at_t(t)
+
+                if abs(twist_deg) < 0.01:
+                    # No significant twist, keep original frame
+                    twisted_frames.append(frames[point_index])
+                else:
+                    # Apply twist rotation around tangent
+                    right, up = frames[point_index]
+
+                    # Calculate tangent at this point
+                    if point_index < len(all_points) - 1:
+                        tangent = all_points[point_index + 1] - all_points[point_index]
+                    else:
+                        tangent = all_points[point_index] - all_points[point_index - 1]
+                    tangent_len = np.linalg.norm(tangent)
+                    if tangent_len > 1e-6:
+                        tangent = tangent / tangent_len
+                    else:
+                        tangent = np.array([1.0, 0.0, 0.0])
+
+                    # Rotate right and up vectors around tangent
+                    twist_rad = np.radians(twist_deg)
+                    new_right = self._rotate_vector(right, tangent, twist_rad)
+                    new_up = self._rotate_vector(up, tangent, twist_rad)
+
+                    twisted_frames.append((new_right, new_up))
+
+                point_index += 1
+
+        # Handle any remaining frames (shouldn't happen, but be safe)
+        while point_index < len(frames):
+            twisted_frames.append(frames[point_index])
+            point_index += 1
+
+        return twisted_frames
 
     def _get_or_build_chain_vbo(self, chain, points, frames, curve_segments, tube_segments):
         """Get or build a VBO for the given chain geometry and LOD."""
@@ -603,6 +693,84 @@ class Strand:
         cos_a = np.cos(angle)
         sin_a = np.sin(angle)
         return v * cos_a + np.cross(axis, v) * sin_a + axis * np.dot(axis, v) * (1 - cos_a)
+
+    def get_twist_at_t(self, t):
+        """
+        Get the interpolated twist angle at parameter t along the curve.
+        Uses cubic Bezier-style interpolation between the four twist values:
+        - t=0: start_twist
+        - Control points influence the interpolation curve
+        - t=1: end_twist
+
+        Args:
+            t: Parameter from 0 to 1
+
+        Returns:
+            Twist angle in degrees
+        """
+        # Use cubic Bezier interpolation for smooth twist transitions
+        # The control point twists act like Bezier control weights
+        t2 = t * t
+        t3 = t2 * t
+        mt = 1 - t
+        mt2 = mt * mt
+        mt3 = mt2 * mt
+
+        return (mt3 * self.start_twist +
+                3 * mt2 * t * self.cp1_twist +
+                3 * mt * t2 * self.cp2_twist +
+                t3 * self.end_twist)
+
+    def _apply_twist_to_frames(self, frames, points):
+        """
+        Apply twist rotation to computed frames based on twist angles.
+
+        Args:
+            frames: List of (right, up) frame tuples from parallel transport
+            points: Curve points corresponding to each frame
+
+        Returns:
+            New list of (right, up) tuples with twist applied
+        """
+        if len(frames) < 2:
+            return frames
+
+        twisted_frames = []
+        n = len(frames)
+
+        for i in range(n):
+            # Calculate t parameter for this point
+            t = i / (n - 1) if n > 1 else 0.0
+
+            # Get twist angle at this point
+            twist_deg = self.get_twist_at_t(t)
+
+            if abs(twist_deg) < 0.01:
+                # No significant twist, keep original frame
+                twisted_frames.append(frames[i])
+            else:
+                # Apply twist rotation around tangent
+                right, up = frames[i]
+
+                # Calculate tangent at this point
+                if i < n - 1:
+                    tangent = points[i + 1] - points[i]
+                else:
+                    tangent = points[i] - points[i - 1]
+                tangent_len = np.linalg.norm(tangent)
+                if tangent_len > 1e-6:
+                    tangent = tangent / tangent_len
+                else:
+                    tangent = np.array([1.0, 0.0, 0.0])
+
+                # Rotate right and up vectors around tangent
+                twist_rad = np.radians(twist_deg)
+                new_right = self._rotate_vector(right, tangent, twist_rad)
+                new_up = self._rotate_vector(up, tangent, twist_rad)
+
+                twisted_frames.append((new_right, new_up))
+
+        return twisted_frames
 
     def _draw_tube_from_points(self, points, frames, tube_segments=None):
         """Draw a tube along the given points using the provided frames"""
@@ -1156,6 +1324,65 @@ class Strand:
         self.control_point2 += delta
         self._mark_geometry_dirty()
 
+    # ==================== Twist Angle Methods ====================
+
+    def set_start_twist(self, angle):
+        """Set the twist angle at the start point (in degrees)"""
+        self.start_twist = float(angle)
+        self._mark_geometry_dirty()
+
+    def set_end_twist(self, angle):
+        """Set the twist angle at the end point (in degrees)"""
+        self.end_twist = float(angle)
+        self._mark_geometry_dirty()
+
+    def set_cp1_twist(self, angle):
+        """Set the twist angle at control point 1 (in degrees)"""
+        self.cp1_twist = float(angle)
+        self._mark_geometry_dirty()
+
+    def set_cp2_twist(self, angle):
+        """Set the twist angle at control point 2 (in degrees)"""
+        self.cp2_twist = float(angle)
+        self._mark_geometry_dirty()
+
+    def set_twist(self, point_name, angle):
+        """
+        Set twist angle for a specific point.
+
+        Args:
+            point_name: 'start', 'end', 'cp1', or 'cp2'
+            angle: Twist angle in degrees
+        """
+        if point_name == 'start':
+            self.set_start_twist(angle)
+        elif point_name == 'end':
+            self.set_end_twist(angle)
+        elif point_name == 'cp1':
+            self.set_cp1_twist(angle)
+        elif point_name == 'cp2':
+            self.set_cp2_twist(angle)
+
+    def get_twist(self, point_name):
+        """
+        Get twist angle for a specific point.
+
+        Args:
+            point_name: 'start', 'end', 'cp1', or 'cp2'
+
+        Returns:
+            Twist angle in degrees
+        """
+        if point_name == 'start':
+            return self.start_twist
+        elif point_name == 'end':
+            return self.end_twist
+        elif point_name == 'cp1':
+            return self.cp1_twist
+        elif point_name == 'cp2':
+            return self.cp2_twist
+        return 0.0
+
     # ==================== Serialization ====================
 
     def to_dict(self):
@@ -1169,7 +1396,11 @@ class Strand:
             'color': self.color,
             'width': self.width,
             'height_ratio': self.height_ratio,
-            'visible': self.visible
+            'visible': self.visible,
+            'start_twist': self.start_twist,
+            'end_twist': self.end_twist,
+            'cp1_twist': self.cp1_twist,
+            'cp2_twist': self.cp2_twist
         }
 
     @classmethod
@@ -1187,6 +1418,13 @@ class Strand:
         strand.control_point2 = np.array(data['control_point2'])
         strand.height_ratio = data.get('height_ratio', 0.4)
         strand.visible = data.get('visible', True)
+
+        # Load twist angles (default to 0 for backwards compatibility)
+        strand.start_twist = data.get('start_twist', 0.0)
+        strand.end_twist = data.get('end_twist', 0.0)
+        strand.cp1_twist = data.get('cp1_twist', 0.0)
+        strand.cp2_twist = data.get('cp2_twist', 0.0)
+
         strand._mark_geometry_dirty()
 
         return strand

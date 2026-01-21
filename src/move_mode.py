@@ -32,6 +32,15 @@ class MoveModeMixin:
     DASH_LENGTH = 0.15           # Length of each dash segment
     DASH_GAP = 0.1               # Gap between dashes
 
+    # Twist ring visual settings
+    TWIST_RING_RADIUS_FACTOR = 1.8  # Ring radius = box_size * this factor
+    TWIST_RING_COLOR = (0.8, 0.8, 1.0, 0.5)  # Light blue semi-transparent
+    TWIST_RING_HOVER_COLOR = (1.0, 1.0, 0.5, 0.7)  # Yellow when hovering
+    TWIST_RING_ACTIVE_COLOR = (0.5, 1.0, 0.5, 0.8)  # Green when dragging
+    TWIST_NOTCH_COLOR = (1.0, 1.0, 1.0, 0.9)  # White notch marker
+    TWIST_RING_SEGMENTS = 32  # Number of segments for the ring
+    TWIST_RING_THICKNESS = 3.0  # Line width for the ring
+
     def _draw_control_points(self):
         """
         Draw control points for strands.
@@ -277,6 +286,9 @@ class MoveModeMixin:
             else:
                 self._draw_box(strand.control_point2, cp_box_size, RED_IDLE)
 
+        # Draw twist rings around all control point boxes
+        self._draw_twist_rings_for_strand(strand, box_size)
+
         glDisable(GL_BLEND)
         glEnable(GL_LIGHTING)
 
@@ -358,6 +370,198 @@ class MoveModeMixin:
 
         glLineWidth(1.0)
 
+    def _draw_twist_ring(self, position, box_size, strand, point_name, tangent=None):
+        """
+        Draw a twist rotation ring around a control point.
+
+        Uses a fixed world-space orientation (horizontal ring in XZ plane)
+        so that moving other control points doesn't affect the ring orientation.
+
+        Args:
+            position: 3D position of the control point
+            box_size: Size of the control point box (ring radius is based on this)
+            strand: The strand object (to get twist angle)
+            point_name: 'start', 'end', 'cp1', or 'cp2'
+            tangent: Ignored - kept for API compatibility
+        """
+        # Get current twist angle for this point
+        twist_angle = strand.get_twist(point_name)
+
+        # Calculate ring radius
+        ring_radius = box_size * self.TWIST_RING_RADIUS_FACTOR
+
+        # Determine color based on hover/drag state
+        hovered_ring = getattr(self, 'hovered_twist_ring', None)
+        dragging_ring = getattr(self, 'dragging_twist_ring', None)
+
+        if dragging_ring == point_name:
+            color = self.TWIST_RING_ACTIVE_COLOR
+            line_width = self.TWIST_RING_THICKNESS + 1.5
+        elif hovered_ring == point_name:
+            color = self.TWIST_RING_HOVER_COLOR
+            line_width = self.TWIST_RING_THICKNESS + 1.0
+        else:
+            color = self.TWIST_RING_COLOR
+            line_width = self.TWIST_RING_THICKNESS
+
+        # Use fixed world-space orientation based on current move axis mode
+        # This ensures moving start/end doesn't affect other ring orientations
+        move_mode = getattr(self, 'move_axis_mode', 'normal')
+
+        if move_mode == "normal":
+            # XZ mode: ring perpendicular to XZ plane (vertical ring in YZ plane)
+            perp1 = np.array([0.0, 1.0, 0.0])  # Y axis
+            perp2 = np.array([0.0, 0.0, 1.0])  # Z axis
+
+        elif move_mode == "vertical":
+            # Y mode: ring in XZ plane (horizontal)
+            perp1 = np.array([1.0, 0.0, 0.0])  # X axis
+            perp2 = np.array([0.0, 0.0, 1.0])  # Z axis
+
+        elif move_mode == "depth":
+            # Depth mode: ring always faces camera (perpendicular to view direction)
+            # Calculate camera direction
+            azimuth_rad = math.radians(self.camera_azimuth)
+            elevation_rad = math.radians(self.camera_elevation)
+
+            # Camera forward direction (from camera to target)
+            cam_forward = np.array([
+                -math.cos(elevation_rad) * math.sin(azimuth_rad),
+                -math.sin(elevation_rad),
+                -math.cos(elevation_rad) * math.cos(azimuth_rad)
+            ])
+
+            # Ring plane perpendicular to camera view
+            # Find two perpendicular vectors in the plane facing camera
+            if abs(cam_forward[1]) < 0.9:
+                up_hint = np.array([0.0, 1.0, 0.0])
+            else:
+                up_hint = np.array([1.0, 0.0, 0.0])
+
+            perp1 = np.cross(cam_forward, up_hint)
+            perp1_len = np.linalg.norm(perp1)
+            if perp1_len > 1e-6:
+                perp1 = perp1 / perp1_len
+            else:
+                perp1 = np.array([1.0, 0.0, 0.0])
+
+            perp2 = np.cross(cam_forward, perp1)
+            perp2_len = np.linalg.norm(perp2)
+            if perp2_len > 1e-6:
+                perp2 = perp2 / perp2_len
+            else:
+                perp2 = np.array([0.0, 1.0, 0.0])
+
+        elif move_mode == "along":
+            # Along mode: each ring perpendicular to its own along vector
+            # Calculate along direction based on which point this is
+            along_dir = None
+            if point_name == 'start':
+                along_dir = strand.end - strand.start
+            elif point_name == 'end':
+                along_dir = strand.start - strand.end
+            elif point_name == 'cp1':
+                along_dir = strand.start - strand.control_point1  # CP1 to Start
+            elif point_name == 'cp2':
+                along_dir = strand.end - strand.control_point2    # CP2 to End
+
+            if along_dir is not None and np.linalg.norm(along_dir) > 1e-6:
+                along_dir = along_dir / np.linalg.norm(along_dir)
+
+                # Find perpendicular vectors to along direction
+                if abs(along_dir[1]) < 0.9:
+                    up_hint = np.array([0.0, 1.0, 0.0])
+                else:
+                    up_hint = np.array([1.0, 0.0, 0.0])
+
+                perp1 = np.cross(along_dir, up_hint)
+                perp1_len = np.linalg.norm(perp1)
+                if perp1_len > 1e-6:
+                    perp1 = perp1 / perp1_len
+                else:
+                    perp1 = np.array([1.0, 0.0, 0.0])
+
+                perp2 = np.cross(along_dir, perp1)
+                perp2_len = np.linalg.norm(perp2)
+                if perp2_len > 1e-6:
+                    perp2 = perp2 / perp2_len
+                else:
+                    perp2 = np.array([0.0, 1.0, 0.0])
+            else:
+                # Fallback to horizontal if no along direction
+                perp1 = np.array([1.0, 0.0, 0.0])
+                perp2 = np.array([0.0, 0.0, 1.0])
+
+        else:
+            # Default: horizontal ring in XZ plane
+            perp1 = np.array([1.0, 0.0, 0.0])  # X axis
+            perp2 = np.array([0.0, 0.0, 1.0])  # Z axis
+
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+        # Draw the ring
+        glLineWidth(line_width)
+        glColor4f(*color)
+        glBegin(GL_LINE_LOOP)
+
+        for i in range(self.TWIST_RING_SEGMENTS):
+            angle = 2 * math.pi * i / self.TWIST_RING_SEGMENTS
+            point = (position +
+                     perp1 * math.cos(angle) * ring_radius +
+                     perp2 * math.sin(angle) * ring_radius)
+            glVertex3f(point[0], point[1], point[2])
+
+        glEnd()
+
+        # Draw the notch marker showing current twist angle
+        notch_angle = math.radians(twist_angle)
+        notch_inner = ring_radius * 0.7
+        notch_outer = ring_radius * 1.1
+
+        # Notch position
+        notch_dir = perp1 * math.cos(notch_angle) + perp2 * math.sin(notch_angle)
+        notch_start = position + notch_dir * notch_inner
+        notch_end = position + notch_dir * notch_outer
+
+        # Draw notch as a thick line
+        glLineWidth(line_width + 2.0)
+        glColor4f(*self.TWIST_NOTCH_COLOR)
+        glBegin(GL_LINES)
+        glVertex3f(notch_start[0], notch_start[1], notch_start[2])
+        glVertex3f(notch_end[0], notch_end[1], notch_end[2])
+        glEnd()
+
+        # Draw a small circle at the notch end for visibility
+        glPointSize(8.0)
+        glBegin(GL_POINTS)
+        glVertex3f(notch_end[0], notch_end[1], notch_end[2])
+        glEnd()
+        glPointSize(1.0)
+
+        glLineWidth(1.0)
+        glDisable(GL_BLEND)
+
+    def _draw_twist_rings_for_strand(self, strand, box_size):
+        """
+        Draw twist rings for all control points of a strand.
+
+        Args:
+            strand: The strand to draw rings for
+            box_size: Base box size for calculating ring radius
+        """
+        # Draw twist ring for start point
+        self._draw_twist_ring(strand.start, box_size, strand, 'start')
+
+        # Draw twist ring for end point
+        self._draw_twist_ring(strand.end, box_size, strand, 'end')
+
+        # Draw twist rings for control points (if not in straight mode)
+        if not self.straight_segment_mode:
+            cp_box_size = box_size * 0.8
+            self._draw_twist_ring(strand.control_point1, cp_box_size, strand, 'cp1')
+            self._draw_twist_ring(strand.control_point2, cp_box_size, strand, 'cp2')
+
     def _update_control_point_hover(self, screen_x, screen_y):
         """Update which control point is being hovered"""
         if not self.selected_strand:
@@ -422,11 +626,141 @@ class MoveModeMixin:
 
         self.hovered_control_point = closest_cp
 
+        # Check for twist ring hover (only if not hovering over a box)
+        hovered_ring = None
+        if not self.hovered_control_point:
+            hovered_ring = self._check_twist_ring_hover(screen_x, screen_y, strand, control_points)
+
+        # Store the hovered ring state
+        self.hovered_twist_ring = hovered_ring
+
         # Update cursor based on hover state
         if self.hovered_control_point:
             self.setCursor(Qt.SizeAllCursor)  # Move cursor when hovering over control point
+        elif self.hovered_twist_ring:
+            self.setCursor(Qt.PointingHandCursor)  # Point cursor for twist ring
         else:
             self.setCursor(Qt.ArrowCursor)
+
+    def _check_twist_ring_hover(self, screen_x, screen_y, strand, control_points):
+        """
+        Check if the mouse is hovering over a twist ring.
+
+        The ring is detected as a donut-shaped area around the control point,
+        between the box edge and the ring outer edge.
+
+        Args:
+            screen_x, screen_y: Mouse screen coordinates
+            strand: The selected strand
+            control_points: Dict of control point names to positions
+
+        Returns:
+            Name of the hovered ring ('start', 'end', 'cp1', 'cp2') or None
+        """
+        closest_ring = None
+        closest_ring_dist = float('inf')
+
+        for cp_name, cp_pos in control_points.items():
+            screen_center = self._project_point_to_screen(cp_pos)
+            if not screen_center:
+                continue
+
+            # Calculate box size and ring radius in screen space
+            box_size = self.control_point_box_size
+            if cp_name in ('cp1', 'cp2'):
+                box_size *= 0.8
+
+            ring_radius_3d = box_size * self.TWIST_RING_RADIUS_FACTOR
+
+            # Use orientation matching _draw_twist_ring based on move axis mode
+            move_mode = getattr(self, 'move_axis_mode', 'normal')
+
+            if move_mode == "normal":
+                # XZ mode: vertical ring (YZ plane)
+                perp = np.array([0.0, 1.0, 0.0])  # Y axis
+            elif move_mode == "vertical":
+                # Y mode: horizontal ring (XZ plane)
+                perp = np.array([1.0, 0.0, 0.0])  # X axis
+            elif move_mode == "depth":
+                # Depth mode: ring faces camera
+                azimuth_rad = math.radians(self.camera_azimuth)
+                elevation_rad = math.radians(self.camera_elevation)
+                cam_forward = np.array([
+                    -math.cos(elevation_rad) * math.sin(azimuth_rad),
+                    -math.sin(elevation_rad),
+                    -math.cos(elevation_rad) * math.cos(azimuth_rad)
+                ])
+                if abs(cam_forward[1]) < 0.9:
+                    up_hint = np.array([0.0, 1.0, 0.0])
+                else:
+                    up_hint = np.array([1.0, 0.0, 0.0])
+                perp = np.cross(cam_forward, up_hint)
+                perp_len = np.linalg.norm(perp)
+                if perp_len > 1e-6:
+                    perp = perp / perp_len
+                else:
+                    perp = np.array([1.0, 0.0, 0.0])
+            elif move_mode == "along":
+                # Along mode: each ring perpendicular to its own along vector
+                along_dir = None
+                if cp_name == 'start':
+                    along_dir = strand.end - strand.start
+                elif cp_name == 'end':
+                    along_dir = strand.start - strand.end
+                elif cp_name == 'cp1':
+                    along_dir = strand.start - strand.control_point1  # CP1 to Start
+                elif cp_name == 'cp2':
+                    along_dir = strand.end - strand.control_point2    # CP2 to End
+
+                if along_dir is not None and np.linalg.norm(along_dir) > 1e-6:
+                    along_dir = along_dir / np.linalg.norm(along_dir)
+                    if abs(along_dir[1]) < 0.9:
+                        up_hint = np.array([0.0, 1.0, 0.0])
+                    else:
+                        up_hint = np.array([1.0, 0.0, 0.0])
+                    perp = np.cross(along_dir, up_hint)
+                    perp_len = np.linalg.norm(perp)
+                    if perp_len > 1e-6:
+                        perp = perp / perp_len
+                    else:
+                        perp = np.array([1.0, 0.0, 0.0])
+                else:
+                    perp = np.array([1.0, 0.0, 0.0])
+            else:
+                # Default: horizontal
+                perp = np.array([1.0, 0.0, 0.0])
+
+            # Project ring edge point
+            ring_edge = cp_pos + perp * ring_radius_3d
+            ring_screen = self._project_point_to_screen(ring_edge)
+            if not ring_screen:
+                continue
+
+            # Calculate screen ring radius
+            screen_ring_radius = math.sqrt(
+                (ring_screen[0] - screen_center[0]) ** 2 +
+                (ring_screen[1] - screen_center[1]) ** 2
+            )
+
+            # Calculate screen distance from mouse to center
+            dx = screen_x - screen_center[0]
+            dy = screen_y - screen_center[1]
+            screen_dist = math.sqrt(dx * dx + dy * dy)
+
+            # Ring is detected as donut between inner and outer radius
+            # Inner radius is about 60% of ring radius (to exclude box area)
+            # Outer radius is about 120% of ring radius (tolerance)
+            inner_threshold = screen_ring_radius * 0.5
+            outer_threshold = screen_ring_radius * 1.3
+
+            if inner_threshold < screen_dist < outer_threshold:
+                # Calculate how close to the ring line itself
+                ring_dist = abs(screen_dist - screen_ring_radius)
+                if ring_dist < closest_ring_dist:
+                    closest_ring_dist = ring_dist
+                    closest_ring = cp_name
+
+        return closest_ring
 
     def _start_move(self, screen_x, screen_y):
         """Start moving strand or control point - only works when clicking on a control point box"""
@@ -893,3 +1227,209 @@ class MoveModeMixin:
         # Reset depth tracking for next drag
         if hasattr(self, '_last_depth_screen_y'):
             delattr(self, '_last_depth_screen_y')
+
+    # ==================== Twist Drag Methods ====================
+
+    def _start_twist_drag(self, screen_x, screen_y):
+        """
+        Start twisting a control point's orientation.
+
+        Only starts if the mouse is over a twist ring.
+
+        Args:
+            screen_x, screen_y: Mouse screen coordinates
+
+        Returns:
+            True if twist drag started, False otherwise
+        """
+        if not self.selected_strand:
+            return False
+
+        # Check if we're hovering over a twist ring
+        hovered_ring = getattr(self, 'hovered_twist_ring', None)
+        if not hovered_ring:
+            return False
+
+        # Save state for undo
+        if hasattr(self, 'undo_redo_manager') and self.undo_redo_manager:
+            self.undo_redo_manager.save_state()
+
+        # Initialize twist drag state
+        self.dragging_twist_ring = hovered_ring
+        self.twist_drag_start_x = screen_x
+        self.twist_drag_last_x = screen_x
+        self.twist_drag_start_screen_pos = (screen_x, screen_y)
+        self.twist_drag_start_angle = self.selected_strand.get_twist(hovered_ring)
+        self.twist_drag_total_angle = 0.0
+
+        print(f"Twist: Started twisting {hovered_ring} of {self.selected_strand.name}")
+        self.update()
+        return True
+
+    def _update_twist_drag(self, screen_x, screen_y):
+        """
+        Update the twist angle based on horizontal mouse movement.
+
+        Dragging right increases the angle, dragging left decreases it.
+
+        Args:
+            screen_x, screen_y: Current mouse screen coordinates
+
+        Returns:
+            True if twist was updated, False otherwise
+        """
+        dragging_ring = getattr(self, 'dragging_twist_ring', None)
+        if not dragging_ring or not self.selected_strand:
+            return False
+
+        # Calculate horizontal movement
+        screen_dx = screen_x - self.twist_drag_last_x
+        self.twist_drag_last_x = screen_x
+
+        # Convert screen pixels to degrees
+        # Use a reasonable sensitivity (about 1 degree per 2 pixels)
+        angle_speed = 0.5  # Degrees per pixel
+        angle_delta = screen_dx * angle_speed
+
+        # Update the twist angle
+        current_angle = self.selected_strand.get_twist(dragging_ring)
+        new_angle = current_angle + angle_delta
+        self.selected_strand.set_twist(dragging_ring, new_angle)
+
+        self.twist_drag_total_angle += angle_delta
+
+        self.update()
+        return True
+
+    def _end_twist_drag(self):
+        """
+        End the twist drag operation.
+
+        Returns:
+            True if twist drag was ended, False if not dragging
+        """
+        dragging_ring = getattr(self, 'dragging_twist_ring', None)
+        if not dragging_ring:
+            return False
+
+        total_angle = getattr(self, 'twist_drag_total_angle', 0.0)
+        print(f"Twist: Finished twisting {dragging_ring} (delta: {total_angle:.1f}°)")
+
+        # Clear twist drag state
+        self.dragging_twist_ring = None
+        self.twist_drag_start_x = None
+        self.twist_drag_last_x = None
+        self.twist_drag_start_screen_pos = None
+        self.twist_drag_start_angle = None
+        self.twist_drag_total_angle = 0.0
+
+        self.update()
+        return True
+
+    def _is_twist_dragging(self):
+        """Check if we're currently dragging a twist ring."""
+        return getattr(self, 'dragging_twist_ring', None) is not None
+
+    def _draw_twist_drag_ui(self):
+        """
+        Draw 2D overlay UI showing twist angle during drag.
+        Similar to rotate mode's drag UI.
+        """
+        dragging_ring = getattr(self, 'dragging_twist_ring', None)
+        if not dragging_ring:
+            return
+
+        start_pos = getattr(self, 'twist_drag_start_screen_pos', None)
+        if not start_pos:
+            return
+
+        start_x, start_y = start_pos
+        total_angle = getattr(self, 'twist_drag_total_angle', 0.0)
+
+        # Switch to 2D orthographic projection
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+
+        width = self.width()
+        height = self.height()
+        glOrtho(0, width, height, 0, -1, 1)
+
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+
+        glDisable(GL_DEPTH_TEST)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+        # Draw indicator lines
+        line_length = 100
+        arrow_size = 10
+
+        # Left arrow (negative rotation) - red
+        glLineWidth(3.0)
+        glColor4f(1.0, 0.3, 0.3, 0.9)
+        glBegin(GL_LINES)
+        glVertex2f(start_x, start_y)
+        glVertex2f(start_x - line_length, start_y)
+        glEnd()
+
+        glBegin(GL_TRIANGLES)
+        glVertex2f(start_x - line_length, start_y)
+        glVertex2f(start_x - line_length + arrow_size, start_y - arrow_size * 0.6)
+        glVertex2f(start_x - line_length + arrow_size, start_y + arrow_size * 0.6)
+        glEnd()
+
+        # Right arrow (positive rotation) - green
+        glColor4f(0.3, 1.0, 0.3, 0.9)
+        glBegin(GL_LINES)
+        glVertex2f(start_x, start_y)
+        glVertex2f(start_x + line_length, start_y)
+        glEnd()
+
+        glBegin(GL_TRIANGLES)
+        glVertex2f(start_x + line_length, start_y)
+        glVertex2f(start_x + line_length - arrow_size, start_y - arrow_size * 0.6)
+        glVertex2f(start_x + line_length - arrow_size, start_y + arrow_size * 0.6)
+        glEnd()
+
+        # Center point
+        glColor4f(1.0, 1.0, 1.0, 1.0)
+        glPointSize(10.0)
+        glBegin(GL_POINTS)
+        glVertex2f(start_x, start_y)
+        glEnd()
+
+        # Angle bar
+        text_y = start_y - 25
+        angle_bar_width = min(abs(total_angle) * 1.5, 100)
+        if total_angle != 0:
+            if total_angle > 0:
+                glColor4f(0.3, 1.0, 0.3, 0.7)
+                glBegin(GL_QUADS)
+                glVertex2f(start_x, text_y - 8)
+                glVertex2f(start_x + angle_bar_width, text_y - 8)
+                glVertex2f(start_x + angle_bar_width, text_y + 8)
+                glVertex2f(start_x, text_y + 8)
+                glEnd()
+            else:
+                glColor4f(1.0, 0.3, 0.3, 0.7)
+                glBegin(GL_QUADS)
+                glVertex2f(start_x, text_y - 8)
+                glVertex2f(start_x - angle_bar_width, text_y - 8)
+                glVertex2f(start_x - angle_bar_width, text_y + 8)
+                glVertex2f(start_x, text_y + 8)
+                glEnd()
+
+        glLineWidth(1.0)
+        glPointSize(1.0)
+        glDisable(GL_BLEND)
+        glEnable(GL_DEPTH_TEST)
+
+        # Restore matrices
+        glMatrixMode(GL_MODELVIEW)
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
