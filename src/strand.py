@@ -27,7 +27,7 @@ class Strand:
             start: numpy array [x, y, z] - start position
             end: numpy array [x, y, z] - end position
             name: strand identifier (e.g., "1_1", "1_2")
-            color: RGB tuple (0-1 range), default is orange
+            color: RGB tuple (0-1 range), default is light blue (#aaaaff)
             width: tube radius for rendering
         """
         self.name = name
@@ -35,9 +35,11 @@ class Strand:
         self.end = np.array(end, dtype=float)
 
         # Visual properties
-        self.color = color if color else (0.9, 0.5, 0.1)  # Orange default
+        self.color = color if color else (0.667, 0.667, 1.0, 1.0)  # Light blue #aaaaff default with full opacity
         self.width = width
         self.height_ratio = 0.4  # Height is 40% of width (2.5:1 flat ratio for plastic leather look)
+        self.cross_section_shape = 'ellipse'  # Shape type: 'ellipse', 'rectangle', 'circle', 'diamond', 'hexagon'
+        self.corner_radius = 0.0  # Corner radius for rectangle (0-1, as fraction of min dimension)
         self.visible = True
 
         # Geometry caches (invalidated on control point changes)
@@ -228,10 +230,12 @@ class Strand:
         self.is_selected = is_selected
         self.is_hovered = is_hovered
 
-        # Use strand's actual color (selection highlight is drawn separately)
+        # Use strand's actual color with alpha (selection highlight is drawn separately)
         color = self.color
-
-        glColor3f(*color)
+        if len(color) >= 4:
+            glColor4f(color[0], color[1], color[2], color[3])
+        else:
+            glColor4f(color[0], color[1], color[2], 1.0)
 
         curve_segments = self.curve_segments
         tube_segments = self.tube_segments
@@ -287,7 +291,10 @@ class Strand:
 
         glColor4f(*color)
 
-        height = highlight_width * self.height_ratio
+        # Get cross-section profile points based on shape
+        cs_points, height_ratio = self._get_cross_section_points(tube_segments)
+        ring_count = len(cs_points)
+        height = highlight_width * height_ratio
 
         glBegin(GL_QUAD_STRIP)
 
@@ -297,25 +304,24 @@ class Strand:
             center1 = curve_points[i]
             center2 = curve_points[i + 1]
 
-            for j in range(tube_segments + 1):
-                idx = j % tube_segments
-                angle = 2 * np.pi * idx / tube_segments
+            for j in range(ring_count + 1):
+                idx = j % ring_count
 
-                cos_a = np.cos(angle)
-                sin_a = np.sin(angle)
+                # Get cross-section factors
+                x_factor, y_factor = cs_points[idx]
 
-                offset1 = highlight_width * cos_a * right1 + height * sin_a * up1
+                offset1 = highlight_width * x_factor * right1 + height * y_factor * up1
                 v1 = center1 + offset1
-                n1 = cos_a * right1 + sin_a * up1
+                n1 = x_factor * right1 + y_factor * up1
                 n1_len = np.linalg.norm(n1)
                 if n1_len > 1e-6:
                     n1 = n1 / n1_len
                 glNormal3f(*n1)
                 glVertex3f(*v1)
 
-                offset2 = highlight_width * cos_a * right2 + height * sin_a * up2
+                offset2 = highlight_width * x_factor * right2 + height * y_factor * up2
                 v2 = center2 + offset2
-                n2 = cos_a * right2 + sin_a * up2
+                n2 = x_factor * right2 + y_factor * up2
                 n2_len = np.linalg.norm(n2)
                 if n2_len > 1e-6:
                     n2 = n2 / n2_len
@@ -537,10 +543,13 @@ class Strand:
         if len(points) < 2 or len(frames) < 2 or tube_segments < 3:
             return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
 
-        height = self.width * self.height_ratio
+        # Get cross-section profile points based on shape
+        cs_points, height_ratio = self._get_cross_section_points(tube_segments)
+        ring_count = len(cs_points)
+        height = self.width * height_ratio
+
         vertices = []
         normals = []
-        ring_count = tube_segments
 
         for i in range(len(points) - 1):
             right1, up1 = frames[i]
@@ -550,23 +559,20 @@ class Strand:
 
             for j in range(ring_count):
                 j_next = (j + 1) % ring_count
-                angle0 = 2 * np.pi * j / ring_count
-                angle1 = 2 * np.pi * j_next / ring_count
 
-                cos0 = np.cos(angle0)
-                sin0 = np.sin(angle0)
-                cos1 = np.cos(angle1)
-                sin1 = np.sin(angle1)
+                # Get cross-section factors
+                x0, y0 = cs_points[j]
+                x1, y1 = cs_points[j_next]
 
-                v00 = center1 + (self.width * cos0 * right1 + height * sin0 * up1)
-                v01 = center1 + (self.width * cos1 * right1 + height * sin1 * up1)
-                v10 = center2 + (self.width * cos0 * right2 + height * sin0 * up2)
-                v11 = center2 + (self.width * cos1 * right2 + height * sin1 * up2)
+                v00 = center1 + (self.width * x0 * right1 + height * y0 * up1)
+                v01 = center1 + (self.width * x1 * right1 + height * y1 * up1)
+                v10 = center2 + (self.width * x0 * right2 + height * y0 * up2)
+                v11 = center2 + (self.width * x1 * right2 + height * y1 * up2)
 
-                n00 = cos0 * right1 + sin0 * up1
-                n01 = cos1 * right1 + sin1 * up1
-                n10 = cos0 * right2 + sin0 * up2
-                n11 = cos1 * right2 + sin1 * up2
+                n00 = x0 * right1 + y0 * up1
+                n01 = x1 * right1 + y1 * up1
+                n10 = x0 * right2 + y0 * up2
+                n11 = x1 * right2 + y1 * up2
 
                 n00_len = np.linalg.norm(n00)
                 n01_len = np.linalg.norm(n01)
@@ -780,7 +786,10 @@ class Strand:
         if tube_segments is None:
             tube_segments = self.tube_segments
 
-        height = self.width * self.height_ratio
+        # Get cross-section profile points based on shape
+        cs_points, height_ratio = self._get_cross_section_points(tube_segments)
+        ring_count = len(cs_points)
+        height = self.width * height_ratio
 
         glBegin(GL_QUAD_STRIP)
 
@@ -790,27 +799,29 @@ class Strand:
             center1 = points[i]
             center2 = points[i + 1]
 
-            for j in range(tube_segments + 1):
-                idx = j % tube_segments
-                angle = 2 * np.pi * idx / tube_segments
+            for j in range(ring_count + 1):
+                idx = j % ring_count
 
-                # Elliptical cross-section
-                cos_a = np.cos(angle)
-                sin_a = np.sin(angle)
+                # Get cross-section factors
+                x_factor, y_factor = cs_points[idx]
 
                 # First ring vertex
-                offset1 = self.width * cos_a * right1 + height * sin_a * up1
+                offset1 = self.width * x_factor * right1 + height * y_factor * up1
                 v1 = center1 + offset1
-                n1 = cos_a * right1 + sin_a * up1
-                n1 /= np.linalg.norm(n1)
+                n1 = x_factor * right1 + y_factor * up1
+                n1_len = np.linalg.norm(n1)
+                if n1_len > 1e-6:
+                    n1 /= n1_len
                 glNormal3f(*n1)
                 glVertex3f(*v1)
 
                 # Second ring vertex
-                offset2 = self.width * cos_a * right2 + height * sin_a * up2
+                offset2 = self.width * x_factor * right2 + height * y_factor * up2
                 v2 = center2 + offset2
-                n2 = cos_a * right2 + sin_a * up2
-                n2 /= np.linalg.norm(n2)
+                n2 = x_factor * right2 + y_factor * up2
+                n2_len = np.linalg.norm(n2)
+                if n2_len > 1e-6:
+                    n2 /= n2_len
                 glNormal3f(*n2)
                 glVertex3f(*v2)
 
@@ -822,6 +833,7 @@ class Strand:
 
         Uses the parallel transport frames from tube rendering to ensure
         end cap orientation matches the tube exactly.
+        Uses shape-aware caps that match the cross-section shape.
         """
         if not chain:
             return
@@ -836,10 +848,10 @@ class Strand:
             tangent_len = np.linalg.norm(tangent_start)
             if tangent_len > 1e-6:
                 tangent_start = tangent_start / tangent_len
-            self._draw_ellipsoid_cap_with_frame(
+            self._draw_shape_cap(
                 first_strand.start,
                 tangent_start,
-                frames[0],
+                frame=frames[0],
                 segments=cap_segments
             )
 
@@ -848,19 +860,19 @@ class Strand:
             tangent_len = np.linalg.norm(tangent_end)
             if tangent_len > 1e-6:
                 tangent_end = tangent_end / tangent_len
-            self._draw_ellipsoid_cap_with_frame(
+            self._draw_shape_cap(
                 last_strand.end,
                 tangent_end,
-                frames[-1],
+                frame=frames[-1],
                 segments=cap_segments
             )
         else:
             # Fallback to original behavior if frames not provided
             tangent_start = first_strand.get_bezier_tangent(0.0)
-            self._draw_ellipsoid_cap(first_strand.start, tangent_start, segments=cap_segments)
+            self._draw_shape_cap(first_strand.start, tangent_start, segments=cap_segments)
 
             tangent_end = last_strand.get_bezier_tangent(1.0)
-            self._draw_ellipsoid_cap(last_strand.end, tangent_end, segments=cap_segments)
+            self._draw_shape_cap(last_strand.end, tangent_end, segments=cap_segments)
 
     def _draw_tube(self):
         """Draw the strand as a tube along the Bezier curve using parallel transport frame"""
@@ -881,14 +893,17 @@ class Strand:
             right1, up1 = frames[i]
             right2, up2 = frames[i + 1]
 
-            # Generate circle of vertices at each point
+            # Generate cross-section vertices at each point (shape-aware)
             circle1 = self._get_circle_from_frame(p1, right1, up1)
             circle2 = self._get_circle_from_frame(p2, right2, up2)
 
+            # Use actual vertex count (may vary by shape)
+            num_verts = len(circle1)
+
             # Draw quad strip between circles
             glBegin(GL_QUAD_STRIP)
-            for j in range(self.tube_segments + 1):
-                idx = j % self.tube_segments
+            for j in range(num_verts + 1):
+                idx = j % num_verts
 
                 # Normal is direction from center to vertex
                 normal1 = circle1[idx] - p1
@@ -984,23 +999,269 @@ class Strand:
 
         return frames
 
+    def _get_cross_section_points(self, num_segments):
+        """
+        Pre-compute cross-section profile points (offsets from center).
+        Returns list of (x_factor, y_factor) tuples for each segment.
+        These factors are multiplied by width*right and height*up respectively.
+        """
+        shape = getattr(self, 'cross_section_shape', 'ellipse')
+        height_ratio = self.height_ratio
+
+        points = []
+
+        if shape == 'ellipse':
+            for i in range(num_segments):
+                angle = 2 * np.pi * i / num_segments
+                points.append((np.cos(angle), np.sin(angle)))
+
+        elif shape == 'circle':
+            # Circle: use height_ratio of 1.0 effectively
+            for i in range(num_segments):
+                angle = 2 * np.pi * i / num_segments
+                points.append((np.cos(angle), np.sin(angle)))
+            # Override height_ratio for circle
+            height_ratio = 1.0
+
+        elif shape == 'rectangle':
+            corner_radius = getattr(self, 'corner_radius', 0.0)
+            if corner_radius <= 0:
+                # Sharp rectangle - distribute points along edges
+                segments_per_side = max(1, num_segments // 4)
+                for side in range(4):
+                    for j in range(segments_per_side):
+                        t = j / segments_per_side
+                        if side == 0:    # Top edge (right to left at top)
+                            points.append((1.0 - 2*t, 1.0))
+                        elif side == 1:  # Left edge
+                            points.append((-1.0, 1.0 - 2*t))
+                        elif side == 2:  # Bottom edge
+                            points.append((-1.0 + 2*t, -1.0))
+                        elif side == 3:  # Right edge
+                            points.append((1.0, -1.0 + 2*t))
+            else:
+                # Rounded rectangle
+                r = corner_radius
+                segments_per_corner = max(2, num_segments // 8)
+                segments_per_edge = max(1, num_segments // 8)
+                corners = [(1-r, 1-r), (-1+r, 1-r), (-1+r, -1+r), (1-r, -1+r)]
+                for ci, (cx, cy) in enumerate(corners):
+                    start_angle = -np.pi/2 + ci * np.pi/2
+                    for j in range(segments_per_corner):
+                        angle = start_angle + j * (np.pi/2) / segments_per_corner
+                        points.append((cx + r*np.cos(angle), cy + r*np.sin(angle)))
+                    # Edge after corner
+                    if ci == 0:  # Top edge
+                        for j in range(segments_per_edge):
+                            t = j / segments_per_edge
+                            points.append(((1-r)*(1-t) + (-1+r)*t, 1.0))
+                    elif ci == 1:  # Left edge
+                        for j in range(segments_per_edge):
+                            t = j / segments_per_edge
+                            points.append((-1.0, (1-r)*(1-t) + (-1+r)*t))
+                    elif ci == 2:  # Bottom edge
+                        for j in range(segments_per_edge):
+                            t = j / segments_per_edge
+                            points.append(((-1+r)*(1-t) + (1-r)*t, -1.0))
+                    elif ci == 3:  # Right edge
+                        for j in range(segments_per_edge):
+                            t = j / segments_per_edge
+                            points.append((1.0, (-1+r)*(1-t) + (1-r)*t))
+
+        elif shape == 'diamond':
+            segments_per_side = max(1, num_segments // 4)
+            for side in range(4):
+                for j in range(segments_per_side):
+                    t = j / segments_per_side
+                    if side == 0:    # Top to right
+                        points.append((t, 1.0 - t))
+                    elif side == 1:  # Right to bottom
+                        points.append((1.0 - t, -t))
+                    elif side == 2:  # Bottom to left
+                        points.append((-t, -1.0 + t))
+                    elif side == 3:  # Left to top
+                        points.append((-1.0 + t, t))
+
+        elif shape == 'hexagon':
+            for i in range(6):
+                angle = np.pi/6 + i * np.pi/3
+                points.append((np.cos(angle), np.sin(angle)))
+            # Interpolate to get more segments
+            if num_segments > 6:
+                interpolated = []
+                segments_per_side = max(1, num_segments // 6)
+                for i in range(6):
+                    p1 = points[i]
+                    p2 = points[(i + 1) % 6]
+                    for j in range(segments_per_side):
+                        t = j / segments_per_side
+                        interpolated.append((p1[0]*(1-t) + p2[0]*t, p1[1]*(1-t) + p2[1]*t))
+                points = interpolated
+
+        else:
+            # Fallback to ellipse
+            for i in range(num_segments):
+                angle = 2 * np.pi * i / num_segments
+                points.append((np.cos(angle), np.sin(angle)))
+
+        return points, height_ratio
+
     def _get_ellipse_from_frame(self, center, right, up):
         """
-        Get vertices of an ellipse using pre-computed frame vectors.
-        Creates a flat, lenticular cross-section for plastic leather look.
+        Get vertices of a cross-section shape using pre-computed frame vectors.
+        Supports multiple shapes: ellipse, rectangle, circle, diamond, hexagon.
 
         - 'right' direction: full width
         - 'up' direction: reduced height (height_ratio * width)
         """
         vertices = []
         height = self.width * self.height_ratio
+        shape = getattr(self, 'cross_section_shape', 'ellipse')
 
-        for i in range(self.tube_segments):
-            angle = 2 * np.pi * i / self.tube_segments
-            # Ellipse: width in 'right' direction, height in 'up' direction
-            offset = (self.width * np.cos(angle) * right +
-                     height * np.sin(angle) * up)
-            vertices.append(center + offset)
+        if shape == 'ellipse' or shape == 'circle':
+            # Ellipse/circle cross-section
+            h = height if shape == 'ellipse' else self.width
+            for i in range(self.tube_segments):
+                angle = 2 * np.pi * i / self.tube_segments
+                offset = (self.width * np.cos(angle) * right +
+                         h * np.sin(angle) * up)
+                vertices.append(center + offset)
+
+        elif shape == 'rectangle':
+            # Rectangle with optional rounded corners
+            corner_radius = getattr(self, 'corner_radius', 0.0)
+            vertices = self._get_rectangle_vertices(center, right, up, self.width, height, corner_radius)
+
+        elif shape == 'diamond':
+            # Diamond/rhombus shape (4 vertices, interpolated)
+            segments_per_side = max(2, self.tube_segments // 4)
+            # Top to right
+            for i in range(segments_per_side):
+                t = i / segments_per_side
+                offset = ((1 - t) * 0 + t * self.width) * right + ((1 - t) * height + t * 0) * up
+                vertices.append(center + offset)
+            # Right to bottom
+            for i in range(segments_per_side):
+                t = i / segments_per_side
+                offset = ((1 - t) * self.width + t * 0) * right + ((1 - t) * 0 + t * (-height)) * up
+                vertices.append(center + offset)
+            # Bottom to left
+            for i in range(segments_per_side):
+                t = i / segments_per_side
+                offset = ((1 - t) * 0 + t * (-self.width)) * right + ((1 - t) * (-height) + t * 0) * up
+                vertices.append(center + offset)
+            # Left to top
+            for i in range(segments_per_side):
+                t = i / segments_per_side
+                offset = ((1 - t) * (-self.width) + t * 0) * right + ((1 - t) * 0 + t * height) * up
+                vertices.append(center + offset)
+
+        elif shape == 'hexagon':
+            # Hexagonal cross-section
+            for i in range(6):
+                angle = np.pi / 6 + i * np.pi / 3
+                offset = self.width * np.cos(angle) * right + height * np.sin(angle) * up
+                vertices.append(center + offset)
+            # Interpolate to get smooth segments
+            if self.tube_segments > 6:
+                interpolated = []
+                segments_per_side = max(1, self.tube_segments // 6)
+                for i in range(6):
+                    v1 = vertices[i]
+                    v2 = vertices[(i + 1) % 6]
+                    for j in range(segments_per_side):
+                        t = j / segments_per_side
+                        interpolated.append(v1 * (1 - t) + v2 * t)
+                vertices = interpolated
+
+        else:
+            # Fallback to ellipse
+            for i in range(self.tube_segments):
+                angle = 2 * np.pi * i / self.tube_segments
+                offset = (self.width * np.cos(angle) * right +
+                         height * np.sin(angle) * up)
+                vertices.append(center + offset)
+
+        return vertices
+
+    def _get_rectangle_vertices(self, center, right, up, width, height, corner_radius):
+        """Generate vertices for a rectangle with optional rounded corners."""
+        vertices = []
+
+        if corner_radius <= 0:
+            # Sharp corners - simple rectangle
+            segments_per_side = max(2, self.tube_segments // 4)
+            corners = [
+                (width, height),    # Top-right
+                (width, -height),   # Bottom-right
+                (-width, -height),  # Bottom-left
+                (-width, height),   # Top-left
+            ]
+            for i in range(4):
+                c1 = corners[i]
+                c2 = corners[(i + 1) % 4]
+                for j in range(segments_per_side):
+                    t = j / segments_per_side
+                    x = c1[0] * (1 - t) + c2[0] * t
+                    y = c1[1] * (1 - t) + c2[1] * t
+                    offset = x * right + y * up
+                    vertices.append(center + offset)
+        else:
+            # Rounded corners
+            min_dim = min(width, height)
+            r = corner_radius * min_dim  # Actual corner radius
+
+            segments_per_corner = max(2, self.tube_segments // 8)
+            segments_per_edge = max(1, self.tube_segments // 8)
+
+            # Corner centers
+            corners = [
+                (width - r, height - r),    # Top-right
+                (width - r, -height + r),   # Bottom-right
+                (-width + r, -height + r),  # Bottom-left
+                (-width + r, height - r),   # Top-left
+            ]
+
+            # Generate vertices going around the rectangle
+            for i in range(4):
+                # Corner arc
+                start_angle = -np.pi / 2 + i * np.pi / 2
+                cx, cy = corners[i]
+                for j in range(segments_per_corner):
+                    angle = start_angle + j * (np.pi / 2) / segments_per_corner
+                    x = cx + r * np.cos(angle)
+                    y = cy + r * np.sin(angle)
+                    offset = x * right + y * up
+                    vertices.append(center + offset)
+
+                # Edge to next corner (straight part)
+                next_corner = corners[(i + 1) % 4]
+                # Determine edge direction
+                if i == 0:  # Top-right to bottom-right (right edge)
+                    for j in range(segments_per_edge):
+                        t = j / segments_per_edge
+                        y = (height - r) * (1 - t) + (-height + r) * t
+                        offset = width * right + y * up
+                        vertices.append(center + offset)
+                elif i == 1:  # Bottom-right to bottom-left (bottom edge)
+                    for j in range(segments_per_edge):
+                        t = j / segments_per_edge
+                        x = (width - r) * (1 - t) + (-width + r) * t
+                        offset = x * right + (-height) * up
+                        vertices.append(center + offset)
+                elif i == 2:  # Bottom-left to top-left (left edge)
+                    for j in range(segments_per_edge):
+                        t = j / segments_per_edge
+                        y = (-height + r) * (1 - t) + (height - r) * t
+                        offset = (-width) * right + y * up
+                        vertices.append(center + offset)
+                elif i == 3:  # Top-left to top-right (top edge)
+                    for j in range(segments_per_edge):
+                        t = j / segments_per_edge
+                        x = (-width + r) * (1 - t) + (width - r) * t
+                        offset = x * right + height * up
+                        vertices.append(center + offset)
+
         return vertices
 
     def _get_circle_from_frame(self, center, right, up):
@@ -1042,13 +1303,89 @@ class Strand:
         return vertices
 
     def _draw_end_caps(self):
-        """Draw ellipsoid end caps on the tube"""
+        """Draw end caps on the tube matching the cross-section shape"""
         tangent_start = self.get_bezier_tangent(0.0)
         tangent_end = self.get_bezier_tangent(1.0)
 
-        # Draw both end caps
-        self._draw_ellipsoid_cap(self.start, tangent_start)
-        self._draw_ellipsoid_cap(self.end, tangent_end)
+        # Draw both end caps using shape-aware method
+        self._draw_shape_cap(self.start, tangent_start)
+        self._draw_shape_cap(self.end, tangent_end)
+
+    def _draw_shape_cap(self, position, tangent, frame=None, segments=32):
+        """
+        Draw an end cap matching the current cross-section shape.
+
+        For ellipse/circle: draws a rounded ellipsoid cap
+        For rectangle/diamond/hexagon: draws a flat cap matching the shape
+        """
+        shape = getattr(self, 'cross_section_shape', 'ellipse')
+
+        # For ellipse and circle, use the rounded ellipsoid cap
+        if shape in ('ellipse', 'circle'):
+            if frame:
+                self._draw_ellipsoid_cap_with_frame(position, tangent, frame, segments)
+            else:
+                self._draw_ellipsoid_cap(position, tangent, segments)
+            return
+
+        # For other shapes, draw a flat cap
+        self._draw_flat_cap(position, tangent, frame)
+
+    def _draw_flat_cap(self, position, tangent, frame=None):
+        """
+        Draw a flat end cap matching the cross-section shape.
+        Used for rectangle, diamond, hexagon shapes.
+        """
+        # Normalize tangent
+        tangent = np.array(tangent, dtype=float)
+        tangent_len = np.linalg.norm(tangent)
+        if tangent_len > 1e-6:
+            tangent = tangent / tangent_len
+
+        # Get frame vectors (right, up)
+        if frame:
+            right, up = frame
+        else:
+            # Compute frame if not provided
+            if abs(tangent[1]) < 0.9:
+                up_hint = np.array([0.0, 1.0, 0.0])
+            else:
+                up_hint = np.array([0.0, 0.0, 1.0])
+
+            right = np.cross(tangent, up_hint)
+            right_len = np.linalg.norm(right)
+            if right_len > 1e-6:
+                right /= right_len
+
+            up = np.cross(right, tangent)
+            up_len = np.linalg.norm(up)
+            if up_len > 1e-6:
+                up /= up_len
+
+        # Get the cross-section vertices
+        vertices = self._get_ellipse_from_frame(position, right, up)
+
+        if len(vertices) < 3:
+            return
+
+        # Draw filled polygon for the cap
+        # Use triangle fan from center
+        glBegin(GL_TRIANGLE_FAN)
+
+        # Normal points along tangent (outward from strand)
+        glNormal3f(*tangent)
+
+        # Center vertex
+        glVertex3f(*position)
+
+        # Perimeter vertices
+        for v in vertices:
+            glVertex3f(*v)
+
+        # Close the fan
+        glVertex3f(*vertices[0])
+
+        glEnd()
 
     def _draw_ellipsoid_cap(self, position, tangent, segments=32):
         """Draw an ellipsoid cap at the given position, oriented along tangent"""
@@ -1396,6 +1733,8 @@ class Strand:
             'color': self.color,
             'width': self.width,
             'height_ratio': self.height_ratio,
+            'cross_section_shape': getattr(self, 'cross_section_shape', 'ellipse'),
+            'corner_radius': getattr(self, 'corner_radius', 0.0),
             'visible': self.visible,
             'start_twist': self.start_twist,
             'end_twist': self.end_twist,
@@ -1410,13 +1749,15 @@ class Strand:
             start=data['start'],
             end=data['end'],
             name=data.get('name', ''),
-            color=tuple(data.get('color', (0.9, 0.5, 0.1))),
+            color=tuple(data.get('color', (0.667, 0.667, 1.0, 1.0))),
             width=data.get('width', 0.15)
         )
 
         strand.control_point1 = np.array(data['control_point1'])
         strand.control_point2 = np.array(data['control_point2'])
         strand.height_ratio = data.get('height_ratio', 0.4)
+        strand.cross_section_shape = data.get('cross_section_shape', 'ellipse')
+        strand.corner_radius = data.get('corner_radius', 0.0)
         strand.visible = data.get('visible', True)
 
         # Load twist angles (default to 0 for backwards compatibility)

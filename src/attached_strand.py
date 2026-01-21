@@ -302,7 +302,7 @@ class AttachedStrand(Strand):
         attached.control_point2 = np.array(data['control_point2'])
 
         # Restore visual properties
-        attached.color = tuple(data.get('color', (0.9, 0.5, 0.1)))
+        attached.color = tuple(data.get('color', (0.667, 0.667, 1.0, 1.0)))
         attached.width = data.get('width', 0.15)
         attached.height_ratio = data.get('height_ratio', 0.4)
         attached.visible = data.get('visible', True)

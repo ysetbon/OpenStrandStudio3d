@@ -550,6 +550,10 @@ class MoveModeMixin:
             strand: The strand to draw rings for
             box_size: Base box size for calculating ring radius
         """
+        # Skip twist rings for circular cross-sections (rotation has no visible effect)
+        if getattr(strand, 'cross_section_shape', 'ellipse') == 'circle':
+            return
+
         # Draw twist ring for start point
         self._draw_twist_ring(strand.start, box_size, strand, 'start')
 
@@ -627,9 +631,11 @@ class MoveModeMixin:
         self.hovered_control_point = closest_cp
 
         # Check for twist ring hover (only if not hovering over a box)
+        # Skip for circular cross-sections (rotation has no visible effect)
         hovered_ring = None
         if not self.hovered_control_point:
-            hovered_ring = self._check_twist_ring_hover(screen_x, screen_y, strand, control_points)
+            if getattr(strand, 'cross_section_shape', 'ellipse') != 'circle':
+                hovered_ring = self._check_twist_ring_hover(screen_x, screen_y, strand, control_points)
 
         # Store the hovered ring state
         self.hovered_twist_ring = hovered_ring
@@ -1243,6 +1249,10 @@ class MoveModeMixin:
             True if twist drag started, False otherwise
         """
         if not self.selected_strand:
+            return False
+
+        # Skip for circular cross-sections (rotation has no visible effect)
+        if getattr(self.selected_strand, 'cross_section_shape', 'ellipse') == 'circle':
             return False
 
         # Check if we're hovering over a twist ring

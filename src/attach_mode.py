@@ -236,6 +236,12 @@ class AttachModeMixin:
             name=strand_name
         )
 
+        # Apply default profile settings from canvas
+        self.attach_new_strand.width = self.default_strand_width
+        self.attach_new_strand.height_ratio = self.default_height_ratio
+        self.attach_new_strand.cross_section_shape = self.default_cross_section_shape
+        self.attach_new_strand.corner_radius = self.default_corner_radius
+
         # Override control points to make it a straight line initially
         # (AttachedStrand.__init__ applies C1 alignment which curves it)
         strand = self.attach_new_strand

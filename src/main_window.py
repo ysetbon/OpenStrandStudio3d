@@ -15,6 +15,7 @@ from PyQt5.QtGui import QIcon
 from strand_drawing_canvas import StrandDrawingCanvas
 from layer_panel import LayerPanel
 from undo_redo_manager import UndoRedoManager
+from strand_profile_dialog import StrandProfileDialog
 
 
 class MainWindow(QMainWindow):
@@ -203,6 +204,14 @@ class MainWindow(QMainWindow):
         self.action_toggle_axes.setShortcut("A")
         self.action_toggle_axes.triggered.connect(self._toggle_axes)
         toolbar.addAction(self.action_toggle_axes)
+
+        toolbar.addSeparator()
+
+        # Strand Profile Editor
+        self.action_strand_profile = QAction("Strand Profile", self)
+        self.action_strand_profile.setToolTip("Edit strand cross-section shape and dimensions")
+        self.action_strand_profile.triggered.connect(self._open_strand_profile_editor)
+        toolbar.addAction(self.action_strand_profile)
 
         # Group actions for exclusive selection
         self.mode_actions = [
@@ -425,6 +434,11 @@ class MainWindow(QMainWindow):
         """Toggle axes visibility"""
         visible = self.action_toggle_axes.isChecked()
         self.canvas.set_axes_visible(visible)
+
+    def _open_strand_profile_editor(self):
+        """Open the strand profile editor dialog"""
+        dialog = StrandProfileDialog(self.canvas, self)
+        dialog.exec_()
 
     def _toggle_rigid_points(self):
         """Toggle rigid points (start/end spheres) visibility"""

@@ -184,9 +184,9 @@ class LayerButton(QPushButton):
     """Button representing a single strand layer"""
 
     visibility_changed = pyqtSignal(str, bool)  # name, visible
-    color_changed = pyqtSignal(str, tuple)      # name, color (r,g,b)
+    color_changed = pyqtSignal(str, tuple)      # name, color (r,g,b,a)
 
-    def __init__(self, strand_name: str, color=(0.9, 0.5, 0.1), parent=None):
+    def __init__(self, strand_name: str, color=(0.667, 0.667, 1.0, 1.0), parent=None):
         super().__init__(parent)
 
         self.strand_name = strand_name
@@ -210,8 +210,11 @@ class LayerButton(QPushButton):
 
     def _update_style(self):
         """Update button style based on state"""
-        # Convert color to QColor
-        r, g, b = [int(c * 255) for c in self.strand_color]
+        # Convert color to QColor (handle both RGB and RGBA)
+        r = int(self.strand_color[0] * 255)
+        g = int(self.strand_color[1] * 255)
+        b = int(self.strand_color[2] * 255)
+        a = self.strand_color[3] if len(self.strand_color) > 3 else 1.0
 
         if self.is_selected:
             border_color = "#FFD700"  # Gold for selected
@@ -220,7 +223,7 @@ class LayerButton(QPushButton):
             border_color = "#555555"
             border_width = 1
 
-        opacity = 1.0 if self.is_visible else 0.4
+        opacity = a if self.is_visible else a * 0.4
 
         self.setStyleSheet(f"""
             QPushButton {{
@@ -302,58 +305,84 @@ class LayerButton(QPushButton):
         menu.exec_(self.mapToGlobal(pos))
 
     def _pick_color(self):
-        """Open color picker dialog"""
-        r, g, b = [int(c * 255) for c in self.strand_color]
-        current = QColor(r, g, b)
+        """Open color picker dialog with alpha support"""
+        # Get current color with alpha
+        r, g, b = [int(c * 255) for c in self.strand_color[:3]]
+        a = int(self.strand_color[3] * 255) if len(self.strand_color) > 3 else 255
+        current = QColor(r, g, b, a)
 
         # Create dialog explicitly to style it properly
         color_dialog = QColorDialog(current, self)
         color_dialog.setWindowTitle("Select Strand Color")
         color_dialog.setOption(QColorDialog.DontUseNativeDialog)
+        color_dialog.setOption(QColorDialog.ShowAlphaChannel)  # Enable alpha slider
 
-        # Style the dialog with neutral button colors
+        # Style the dialog with neutral window colors (not strand color)
         color_dialog.setStyleSheet("""
             QColorDialog {
-                background-color: #2a2a2a;
+                background-color: #3c3c3c;
             }
             QColorDialog QWidget {
-                background-color: #2a2a2a;
-                color: white;
+                background-color: #3c3c3c;
+                color: #e0e0e0;
             }
             QColorDialog QPushButton {
-                background-color: #4a4a4a;
-                color: white;
-                border: 1px solid #666666;
+                background-color: #505050;
+                color: #e0e0e0;
+                border: 1px solid #606060;
                 border-radius: 4px;
                 padding: 6px 16px;
                 min-width: 70px;
             }
             QColorDialog QPushButton:hover {
-                background-color: #5a5a5a;
+                background-color: #606060;
+                border: 1px solid #707070;
             }
             QColorDialog QPushButton:pressed {
-                background-color: #3a3a3a;
+                background-color: #404040;
+            }
+            QColorDialog QPushButton:default {
+                background-color: #4080c0;
+                border: 1px solid #5090d0;
+            }
+            QColorDialog QPushButton:default:hover {
+                background-color: #5090d0;
             }
             QColorDialog QLineEdit {
-                background-color: #3a3a3a;
-                color: white;
+                background-color: #2a2a2a;
+                color: #e0e0e0;
                 border: 1px solid #555555;
                 padding: 4px;
+                border-radius: 2px;
             }
             QColorDialog QSpinBox {
-                background-color: #3a3a3a;
-                color: white;
+                background-color: #2a2a2a;
+                color: #e0e0e0;
                 border: 1px solid #555555;
+                border-radius: 2px;
             }
             QColorDialog QLabel {
-                color: white;
+                color: #e0e0e0;
+                background-color: transparent;
+            }
+            QColorDialog QSlider::groove:horizontal {
+                background-color: #2a2a2a;
+                height: 6px;
+                border-radius: 3px;
+            }
+            QColorDialog QSlider::handle:horizontal {
+                background-color: #606060;
+                width: 14px;
+                margin: -4px 0;
+                border-radius: 7px;
             }
         """)
 
         if color_dialog.exec_() == QColorDialog.Accepted:
             color = color_dialog.currentColor()
             if color.isValid():
-                new_color = (color.redF(), color.greenF(), color.blueF())
+                # Include alpha in the color tuple
+                new_color = (color.redF(), color.greenF(), color.blueF(), color.alphaF())
                 self.set_color(new_color)
 
     def _request_delete(self):
@@ -475,7 +504,7 @@ class LayerPanel(QWidget):
             }
         """)
 
-    def add_strand(self, name: str, color=(0.9, 0.5, 0.1)):
+    def add_strand(self, name: str, color=(0.667, 0.667, 1.0, 1.0)):
         """Add a new strand layer button to appropriate set group"""
         if name in self.layer_buttons:
             return

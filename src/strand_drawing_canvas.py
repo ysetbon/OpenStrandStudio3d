@@ -136,6 +136,16 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self.background_top_color = (0.72, 0.73, 0.75)
         self.background_bottom_color = (0.58, 0.59, 0.61)
 
+        # Load user settings for strand profile defaults
+        from user_settings import get_settings
+        settings = get_settings()
+
+        # Default strand profile settings (used when creating new strands)
+        self.default_strand_width = settings.default_strand_width
+        self.default_height_ratio = settings.default_height_ratio
+        self.default_cross_section_shape = settings.default_cross_section_shape
+        self.default_corner_radius = settings.default_corner_radius
+
         # Adaptive LOD settings (distance -> segments)
         self.lod_enabled = True
         self.lod_curve_levels = [
@@ -1208,12 +1218,18 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         set_number = self._get_next_set_number()
         strand_name = f"{set_number}_1"
 
-        # Create strand
+        # Create strand with default profile settings
         strand = Strand(
             start=start_arr,
             end=end_arr,
-            name=strand_name
+            name=strand_name,
+            width=self.default_strand_width
         )
+
+        # Apply default profile settings
+        strand.height_ratio = self.default_height_ratio
+        strand.cross_section_shape = self.default_cross_section_shape
+        strand.corner_radius = self.default_corner_radius
 
         # If in straight mode, make sure new strand is straight
         # (it should already be straight by default, but this ensures consistency)
@@ -1290,6 +1306,8 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             new_strand.color = strand.color
             new_strand.width = strand.width
             new_strand.height_ratio = strand.height_ratio
+            new_strand.cross_section_shape = getattr(strand, 'cross_section_shape', 'ellipse')
+            new_strand.corner_radius = getattr(strand, 'corner_radius', 0.0)
             new_strand.visible = strand.visible
             new_strand.tube_segments = strand.tube_segments
             new_strand.curve_segments = strand.curve_segments
@@ -1326,6 +1344,8 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             new_strand.color = strand.color
             new_strand.width = strand.width
             new_strand.height_ratio = strand.height_ratio
+            new_strand.cross_section_shape = getattr(strand, 'cross_section_shape', 'ellipse')
+            new_strand.corner_radius = getattr(strand, 'corner_radius', 0.0)
             new_strand.visible = strand.visible
             new_strand.tube_segments = strand.tube_segments
             new_strand.curve_segments = strand.curve_segments
@@ -1589,7 +1609,7 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
 
         Args:
             set_number: The set number (e.g., 1 for strands 1_1, 1_2, etc.)
-            color: RGB tuple (0-1 range)
+            color: RGBA tuple (0-1 range)
         """
         set_prefix = f"{set_number}_"
 
