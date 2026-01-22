@@ -109,6 +109,8 @@ class AttachedStrand(Strand):
         Args:
             parent_delta: If provided, mirror this movement (move CP1 by -delta).
                          If None, recalculate CP1 position (used for initial alignment).
+
+        Note: This uses the -delta approximation. For true C1, use sync_cp1_with_parent_c1().
         """
         if parent_delta is not None:
             # Mirror the movement: parent CP moved by delta, we move by -delta
@@ -119,6 +121,29 @@ class AttachedStrand(Strand):
             # Initial alignment or reset
             self._align_cp1_with_parent()
 
+    def sync_cp1_with_parent_c1(self):
+        """
+        Synchronize our CP1 with parent's control point using true C1 symmetry.
+
+        For C1 continuity, our CP1 must be the mirror image of parent's CP
+        around the connection point:
+            child.CP1 = 2 * P - parent.CP
+
+        This ensures mathematically perfect smooth tangent across the connection.
+        """
+        P = self.start  # Connection point
+
+        if self.attachment_side == 1:
+            # Attached to parent's end, mirror parent's CP2
+            parent_cp = self.parent_strand.control_point2
+        else:
+            # Attached to parent's start, mirror parent's CP1
+            parent_cp = self.parent_strand.control_point1
+
+        # True C1: place our CP1 as mirror of parent's CP around connection point
+        self.control_point1 = 2 * P - parent_cp
+        self._mark_geometry_dirty()
+
     def sync_parent_cp_with_our_cp1(self, our_delta=None):
         """
         Synchronize parent's control point with our CP1 to maintain C1 continuity.
@@ -127,6 +152,8 @@ class AttachedStrand(Strand):
         Args:
             our_delta: If provided, mirror this movement to parent's CP (move by -delta).
                       If None, recalculate parent's CP position.
+
+        Note: This uses the -delta approximation. For true C1, use sync_parent_cp_with_our_cp1_c1().
         """
         if our_delta is not None:
             # Mirror the movement: our CP1 moved by delta, parent's CP moves by -delta
@@ -154,6 +181,28 @@ class AttachedStrand(Strand):
                 parent_cp_dist = np.linalg.norm(self.parent_strand.start - self.parent_strand.control_point1)
                 self.parent_strand.control_point1 = self.parent_strand.start + our_tangent_dir * parent_cp_dist
             self.parent_strand._mark_geometry_dirty()
+
+    def sync_parent_cp_with_our_cp1_c1(self):
+        """
+        Synchronize parent's control point with our CP1 using true C1 symmetry.
+
+        For C1 continuity, parent's CP must be the mirror image of our CP1
+        around the connection point:
+            parent.CP = 2 * P - child.CP1
+
+        This ensures mathematically perfect smooth tangent across the connection.
+        """
+        P = self.start  # Connection point
+
+        # True C1: place parent's CP as mirror of our CP1 around connection point
+        if self.attachment_side == 1:
+            # Attached to parent's end, mirror to parent's CP2
+            self.parent_strand.control_point2 = 2 * P - self.control_point1
+        else:
+            # Attached to parent's start, mirror to parent's CP1
+            self.parent_strand.control_point1 = 2 * P - self.control_point1
+
+        self.parent_strand._mark_geometry_dirty()
 
     def _get_default_direction(self, parent_strand, attachment_side):
         """Get a default direction for the new strand based on parent's orientation"""
@@ -188,13 +237,14 @@ class AttachedStrand(Strand):
         self.control_point2 = self.control_point2 + delta
         self._mark_geometry_dirty()
 
-    def set_end(self, position):
+    def set_end(self, position, link_cps=False):
         """
         Set the end position with minimum length constraint.
         (2D-style: only move control points if coincident)
 
         Args:
             position: New end position as numpy array
+            link_cps: If True, sync connected CPs for C1 continuity (passed to parent class)
         """
         position = np.array(position, dtype=float)
 
@@ -222,6 +272,15 @@ class AttachedStrand(Strand):
 
         self.end = position
         self._mark_geometry_dirty()
+
+        # Sync attached strands at end if link_cps enabled (same as parent class)
+        if link_cps:
+            for attached in self.attached_strands:
+                if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
+                    if hasattr(attached, 'update_start_from_parent'):
+                        attached.update_start_from_parent()
+                    if hasattr(attached, 'sync_cp1_with_parent_c1'):
+                        attached.sync_cp1_with_parent_c1()
 
     def get_angle(self):
         """Get the angle of the strand in 3D (returns direction vector)"""

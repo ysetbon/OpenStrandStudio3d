@@ -1,7 +1,7 @@
 {
   "default_strand_width": 0.15,
-  "default_height_ratio": 0.4,
-  "default_cross_section_shape": "hexagon",
+  "default_height_ratio": 1.0,
+  "default_cross_section_shape": "circle",
   "default_corner_radius": 0.0,
   "show_grid": true,
   "show_axes": true

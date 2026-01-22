@@ -16,6 +16,7 @@ from strand_drawing_canvas import StrandDrawingCanvas
 from layer_panel import LayerPanel
 from undo_redo_manager import UndoRedoManager
 from strand_profile_dialog import StrandProfileDialog
+from user_settings import get_settings
 
 
 class MainWindow(QMainWindow):
@@ -36,6 +37,8 @@ class MainWindow(QMainWindow):
         self._setup_toolbar()
         self._setup_statusbar()
         self._connect_signals()
+        self._apply_dark_theme()
+        self._load_user_settings()
 
     def _setup_ui(self):
         """Setup the main UI layout"""
@@ -128,11 +131,11 @@ class MainWindow(QMainWindow):
         self.action_select.triggered.connect(lambda: self._set_mode("select"))
         toolbar.addAction(self.action_select)
 
-        # Add strand mode
+        # Add strand mode (hidden - accessed via layer panel + button)
         self.action_add_strand = QAction("Add Strand", self)
         self.action_add_strand.setCheckable(True)
         self.action_add_strand.triggered.connect(lambda: self._set_mode("add_strand"))
-        toolbar.addAction(self.action_add_strand)
+        # Not added to toolbar - use layer panel + button instead
 
         # Attach mode
         self.action_attach = QAction("Attach", self)
@@ -159,7 +162,8 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.action_rotate)
 
         # Angle Adjust mode
-        self.action_angle_adjust = QAction("Angle/Length", self)
+        self.action_angle_adjust = QAction("Adjust", self)
+        self.action_angle_adjust.setToolTip("Adjust angle and length of selected strand")
         self.action_angle_adjust.setCheckable(True)
         self.action_angle_adjust.triggered.connect(self._activate_angle_adjust)
         toolbar.addAction(self.action_angle_adjust)
@@ -208,7 +212,7 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # Strand Profile Editor
-        self.action_strand_profile = QAction("Strand Profile", self)
+        self.action_strand_profile = QAction("Profile", self)
         self.action_strand_profile.setToolTip("Edit strand cross-section shape and dimensions")
         self.action_strand_profile.triggered.connect(self._open_strand_profile_editor)
         toolbar.addAction(self.action_strand_profile)
@@ -260,6 +264,32 @@ class MainWindow(QMainWindow):
         self.action_move_along.triggered.connect(lambda: self._set_move_axis_mode("along"))
         self.move_mode_group.addAction(self.action_move_along)
         move_toolbar.addAction(self.action_move_along)
+
+        move_toolbar.addSeparator()
+
+        # Link Control Points toggle - when ON, connected CPs sync for smooth spline
+        self.action_link_cps = QAction("Link CPs", self)
+        self.action_link_cps.setCheckable(True)
+        self.action_link_cps.setChecked(False)  # Default OFF (independent mode)
+        self.action_link_cps.setToolTip(
+            "Link Control Points at connections\n"
+            "OFF: Control points are independent (default)\n"
+            "ON: Moving one CP syncs the connected CP for smooth spline"
+        )
+        self.action_link_cps.triggered.connect(self._toggle_link_control_points)
+        move_toolbar.addAction(self.action_link_cps)
+
+        # Edit All toggle - when ON, show CPs for all strands and allow moving any
+        self.action_edit_all = QAction("Edit All", self)
+        self.action_edit_all.setCheckable(True)
+        self.action_edit_all.setChecked(False)  # Default OFF
+        self.action_edit_all.setToolTip(
+            "Edit All Strands\n"
+            "OFF: Only show/edit selected strand's control points (default)\n"
+            "ON: Show control points for ALL strands and move any"
+        )
+        self.action_edit_all.triggered.connect(self._toggle_edit_all)
+        move_toolbar.addAction(self.action_edit_all)
 
         # === Attach mode options toolbar (new line) ===
         self.addToolBarBreak()
@@ -393,6 +423,115 @@ class MainWindow(QMainWindow):
         self.layer_panel.set_duplicate_requested.connect(self._on_set_duplicate_requested)
         self.layer_panel.set_rotate_requested.connect(self._on_set_rotate_requested)
         self.layer_panel.deselect_all_requested.connect(self.canvas.deselect_all)
+        self.layer_panel.add_strand_requested.connect(lambda: self._set_mode("add_strand"))
+
+    def _apply_dark_theme(self):
+        """Apply dark theme styling to the main window"""
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #252528;
+            }
+            QToolBar {
+                background-color: #2D2D30;
+                border: none;
+                border-bottom: 1px solid #3E3E42;
+                spacing: 3px;
+                padding: 3px;
+            }
+            QToolBar::separator {
+                background-color: #3E3E42;
+                width: 1px;
+                margin: 4px 6px;
+            }
+            QToolButton {
+                background-color: #353538;
+                border: 1px solid #3E3E42;
+                border-radius: 4px;
+                padding: 5px 10px;
+                color: #E8E8E8;
+                min-width: 60px;
+            }
+            QToolButton:hover {
+                background-color: #454548;
+                border-color: #5A5A5D;
+            }
+            QToolButton:pressed {
+                background-color: #2A2A2D;
+            }
+            QToolButton:checked {
+                background-color: #3D3D50;
+                border: 1px solid #7B68EE;
+                color: #E8E8E8;
+            }
+            QToolButton:checked:hover {
+                background-color: #4A4A60;
+            }
+            QStatusBar {
+                background-color: #2D2D30;
+                color: #A0A0A0;
+                border-top: 1px solid #3E3E42;
+            }
+            QStatusBar QLabel {
+                color: #A0A0A0;
+                padding: 2px 8px;
+            }
+            QSplitter::handle {
+                background-color: #3E3E42;
+                width: 2px;
+            }
+            QSplitter::handle:hover {
+                background-color: #7B68EE;
+            }
+            QMessageBox {
+                background-color: #2D2D30;
+                color: #E8E8E8;
+            }
+            QMessageBox QLabel {
+                color: #E8E8E8;
+            }
+            QMessageBox QPushButton {
+                background-color: #353538;
+                border: 1px solid #3E3E42;
+                border-radius: 4px;
+                padding: 6px 16px;
+                color: #E8E8E8;
+                min-width: 70px;
+            }
+            QMessageBox QPushButton:hover {
+                background-color: #454548;
+            }
+            QMessageBox QPushButton:pressed {
+                background-color: #2A2A2D;
+            }
+            QFileDialog {
+                background-color: #2D2D30;
+                color: #E8E8E8;
+            }
+        """)
+
+    def _load_user_settings(self):
+        """Load user settings and apply them to the UI"""
+        settings = get_settings()
+
+        # Load grid visibility
+        show_grid = settings.get('show_grid', True)
+        self.action_toggle_grid.setChecked(show_grid)
+        self.canvas.set_grid_visible(show_grid)
+
+        # Load axes visibility
+        show_axes = settings.get('show_axes', True)
+        self.action_toggle_axes.setChecked(show_axes)
+        self.canvas.set_axes_visible(show_axes)
+
+        # Load Link CPs setting
+        link_cps = settings.get('link_control_points', False)
+        self.action_link_cps.setChecked(link_cps)
+        self.canvas.set_link_control_points(link_cps)
+
+        # Load Edit All setting
+        edit_all = settings.get('move_edit_all', False)
+        self.action_edit_all.setChecked(edit_all)
+        self.canvas.set_move_edit_all(edit_all)
 
     def _set_mode(self, mode: str):
         """Set the current interaction mode"""
@@ -429,11 +568,15 @@ class MainWindow(QMainWindow):
         """Toggle grid visibility"""
         visible = self.action_toggle_grid.isChecked()
         self.canvas.set_grid_visible(visible)
+        # Save to user settings
+        get_settings().set_and_save('show_grid', visible)
 
     def _toggle_axes(self):
         """Toggle axes visibility"""
         visible = self.action_toggle_axes.isChecked()
         self.canvas.set_axes_visible(visible)
+        # Save to user settings
+        get_settings().set_and_save('show_axes', visible)
 
     def _open_strand_profile_editor(self):
         """Open the strand profile editor dialog"""
@@ -453,6 +596,28 @@ class MainWindow(QMainWindow):
             self.statusbar.showMessage("Straight segment mode: ON - strands are now straight lines", 3000)
         else:
             self.statusbar.showMessage("Straight segment mode: OFF - curves restored", 3000)
+
+    def _toggle_link_control_points(self):
+        """Toggle linked control points at connections for smooth spline continuity"""
+        enabled = self.action_link_cps.isChecked()
+        self.canvas.set_link_control_points(enabled)
+        # Save to user settings
+        get_settings().set_and_save('link_control_points', enabled)
+        if enabled:
+            self.statusbar.showMessage("Link CPs: ON - connected control points sync for smooth spline", 3000)
+        else:
+            self.statusbar.showMessage("Link CPs: OFF - control points are independent", 3000)
+
+    def _toggle_edit_all(self):
+        """Toggle edit all mode - show and allow editing CPs for all strands"""
+        enabled = self.action_edit_all.isChecked()
+        self.canvas.set_move_edit_all(enabled)
+        # Save to user settings
+        get_settings().set_and_save('move_edit_all', enabled)
+        if enabled:
+            self.statusbar.showMessage("Edit All: ON - showing control points for all strands", 3000)
+        else:
+            self.statusbar.showMessage("Edit All: OFF - only selected strand's control points shown", 3000)
 
     def _activate_angle_adjust(self):
         """Activate angle/length adjust mode for the selected strand"""

@@ -22,9 +22,13 @@ class UserSettings:
         'default_cross_section_shape': 'ellipse',
         'default_corner_radius': 0.0,
 
-        # Other settings can be added here
+        # View settings
         'show_grid': True,
         'show_axes': True,
+
+        # Move mode settings
+        'link_control_points': False,
+        'move_edit_all': False,
     }
 
     def __init__(self):

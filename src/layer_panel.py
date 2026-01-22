@@ -42,20 +42,21 @@ class SetGroupHeader(QPushButton):
 
         self.setStyleSheet("""
             QPushButton {
-                background-color: #3a3a3a;
+                background-color: #2D2D30;
                 border: none;
+                border-left: 3px solid #7B68EE;
                 border-radius: 4px;
-                color: white;
+                color: #E8E8E8;
                 text-align: left;
-                padding-left: 5px;
+                padding-left: 8px;
                 font-weight: bold;
                 font-size: 13px;
             }
             QPushButton:hover {
-                background-color: #4a4a4a;
+                background-color: #3A3A3D;
             }
             QPushButton:pressed {
-                background-color: #2a2a2a;
+                background-color: #2A2A2D;
             }
         """)
 
@@ -154,8 +155,8 @@ class HoverLabel(QLabel):
         if self._hovered:
             self.setStyleSheet("""
                 QLabel {
-                    background-color: #3a3a3a;
-                    color: white;
+                    background-color: #454548;
+                    color: #E8E8E8;
                     padding: 4px 8px;
                     border-radius: 2px;
                 }
@@ -164,7 +165,7 @@ class HoverLabel(QLabel):
             self.setStyleSheet("""
                 QLabel {
                     background-color: transparent;
-                    color: white;
+                    color: #E8E8E8;
                     padding: 4px 8px;
                 }
             """)
@@ -217,10 +218,10 @@ class LayerButton(QPushButton):
         a = self.strand_color[3] if len(self.strand_color) > 3 else 1.0
 
         if self.is_selected:
-            border_color = "#FFD700"  # Gold for selected
+            border_color = "#E6A822"  # Warm gold for selected
             border_width = 2
         else:
-            border_color = "#555555"
+            border_color = "#3E3E42"
             border_width = 1
 
         opacity = a if self.is_visible else a * 0.4
@@ -230,13 +231,16 @@ class LayerButton(QPushButton):
                 background-color: rgba({r}, {g}, {b}, {opacity});
                 border: {border_width}px solid {border_color};
                 border-radius: 4px;
-                color: white;
+                color: #E8E8E8;
                 text-align: left;
                 padding-left: 10px;
                 font-weight: {'bold' if self.is_selected else 'normal'};
             }}
             QPushButton:hover {{
-                border-color: #888888;
+                border-color: #5A5A5D;
+            }}
+            QPushButton:pressed {{
+                background-color: rgba({max(0, r-20)}, {max(0, g-20)}, {max(0, b-20)}, {opacity});
             }}
         """)
 
@@ -266,14 +270,14 @@ class LayerButton(QPushButton):
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu {
-                background-color: #2a2a2a;
-                color: white;
-                border: 1px solid #555555;
+                background-color: #2D2D30;
+                color: #E8E8E8;
+                border: 1px solid #3E3E42;
                 padding: 4px;
             }
             QMenu::separator {
                 height: 1px;
-                background-color: #555555;
+                background-color: #3E3E42;
                 margin: 4px 8px;
             }
         """)
@@ -542,6 +546,7 @@ class LayerPanel(QWidget):
     set_duplicate_requested = pyqtSignal(str)   # set number
     set_rotate_requested = pyqtSignal(str)      # set number
     deselect_all_requested = pyqtSignal()       # deselect all strands
+    add_strand_requested = pyqtSignal()         # request to enter add strand mode
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -568,16 +573,18 @@ class LayerPanel(QWidget):
                 font-size: 14px;
                 font-weight: bold;
                 padding: 5px;
-                background-color: #d9dbdf;
-                color: #2b2b2b;
+                padding-left: 8px;
+                background-color: #2D2D30;
+                color: #E8E8E8;
                 border-radius: 4px;
+                border-left: 3px solid #7B68EE;
             }
         """)
         layout.addWidget(header)
 
         # Info label
-        self.info_label = QLabel("No strands - use Add Strand mode")
-        self.info_label.setStyleSheet("color: #6b6f75; padding: 10px;")
+        self.info_label = QLabel("No strands")
+        self.info_label.setStyleSheet("color: #A0A0A0; padding: 10px; font-style: italic;")
         self.info_label.setWordWrap(True)
         layout.addWidget(self.info_label)
 
@@ -589,6 +596,26 @@ class LayerPanel(QWidget):
             QScrollArea {
                 border: none;
                 background-color: transparent;
+            }
+            QScrollBar:vertical {
+                background-color: #2D2D30;
+                width: 12px;
+                border-radius: 6px;
+                margin: 2px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #454548;
+                border-radius: 5px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #555558;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
             }
         """)
 
@@ -602,46 +629,70 @@ class LayerPanel(QWidget):
         scroll.setWidget(self.layers_container)
         layout.addWidget(scroll)
 
-        # Bottom buttons - row 1
-        buttons_layout1 = QHBoxLayout()
-
-        self.btn_show_all = QPushButton("Show All")
-        self.btn_show_all.clicked.connect(self._show_all)
-        buttons_layout1.addWidget(self.btn_show_all)
-
-        self.btn_hide_all = QPushButton("Hide All")
-        self.btn_hide_all.clicked.connect(self._hide_all)
-        buttons_layout1.addWidget(self.btn_hide_all)
-
-        layout.addLayout(buttons_layout1)
-
-        # Bottom buttons - row 2
+        # Bottom buttons
         buttons_layout2 = QHBoxLayout()
 
         self.btn_deselect_all = QPushButton("Deselect All")
         self.btn_deselect_all.clicked.connect(self._deselect_all)
+        self.btn_deselect_all.setStyleSheet("""
+            QPushButton {
+                background-color: #283040;
+                border: 1px solid #42A5F5;
+                border-radius: 4px;
+                padding: 5px 10px;
+                color: #42A5F5;
+            }
+            QPushButton:hover {
+                background-color: #304050;
+                border-color: #64B5F6;
+            }
+            QPushButton:pressed {
+                background-color: #202830;
+            }
+        """)
         buttons_layout2.addWidget(self.btn_deselect_all)
+
+        self.btn_new_strand = QPushButton("New Strand")
+        self.btn_new_strand.clicked.connect(self._request_add_strand)
+        self.btn_new_strand.setStyleSheet("""
+            QPushButton {
+                background-color: #2D2848;
+                border: 1px solid #7B68EE;
+                border-radius: 4px;
+                padding: 5px 10px;
+                color: #7B68EE;
+            }
+            QPushButton:hover {
+                background-color: #3D3858;
+                border-color: #9B88FF;
+                color: #9B88FF;
+            }
+            QPushButton:pressed {
+                background-color: #252038;
+            }
+        """)
+        buttons_layout2.addWidget(self.btn_new_strand)
 
         layout.addLayout(buttons_layout2)
 
-        # Apply light theme
+        # Apply dark theme
         self.setStyleSheet("""
             QWidget {
-                background-color: #e4e5e7;
-                color: #2b2b2b;
+                background-color: #252528;
+                color: #E8E8E8;
             }
             QPushButton {
-                background-color: #f2f3f4;
-                border: 1px solid #b7bbc0;
+                background-color: #353538;
+                border: 1px solid #3E3E42;
                 border-radius: 4px;
                 padding: 5px 10px;
-                color: #2b2b2b;
+                color: #E8E8E8;
             }
             QPushButton:hover {
-                background-color: #e6e8ea;
+                background-color: #454548;
             }
             QPushButton:pressed {
-                background-color: #d8dade;
+                background-color: #2A2A2D;
             }
         """)
 
@@ -746,15 +797,9 @@ class LayerPanel(QWidget):
         self.select_strand(name)
         self.strand_selected.emit(name)
 
-    def _show_all(self):
-        """Show all strands"""
-        for button in self.layer_buttons.values():
-            button.set_visible(True)
-
-    def _hide_all(self):
-        """Hide all strands"""
-        for button in self.layer_buttons.values():
-            button.set_visible(False)
+    def _request_add_strand(self):
+        """Request to enter add strand mode"""
+        self.add_strand_requested.emit()
 
     def _deselect_all(self):
         """Deselect all strands in panel and canvas"""

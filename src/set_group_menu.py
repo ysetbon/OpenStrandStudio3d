@@ -11,9 +11,9 @@ def build_set_group_menu(parent, on_duplicate, on_rotate):
     menu = QMenu(parent)
     menu.setStyleSheet("""
         QMenu {
-            background-color: #2a2a2a;
-            color: white;
-            border: 1px solid #555555;
+            background-color: #2D2D30;
+            color: #E8E8E8;
+            border: 1px solid #3E3E42;
             padding: 4px;
         }
         QMenu::item {
@@ -21,11 +21,11 @@ def build_set_group_menu(parent, on_duplicate, on_rotate):
             background-color: transparent;
         }
         QMenu::item:selected {
-            background-color: #3a3a3a;
+            background-color: #454548;
         }
         QMenu::separator {
             height: 1px;
-            background-color: #555555;
+            background-color: #3E3E42;
             margin: 4px 8px;
         }
     """)

@@ -268,6 +268,13 @@ class Strand:
         """Draw a subtle hover highlight for this strand."""
         self._draw_highlight(color=(1.0, 0.85, 0.2, 0.25), width_scale=1.25, lod=lod)
 
+    def draw_edit_all_highlight(self, lod=None):
+        """
+        Draw a red highlight for strand being moved/hovered in Edit All mode.
+        Similar to selection highlight but for temporarily active strands.
+        """
+        self._draw_highlight(color=(1.0, 0.2, 0.2, 0.3), width_scale=1.4, lod=lod)
+
     def _draw_highlight(self, color, width_scale, lod=None):
         """Draw a semi-transparent overlay along this strand."""
         if not self.visible:
@@ -1574,8 +1581,15 @@ class Strand:
             self.control_point2 = saved['cp2'].copy()
             self._mark_geometry_dirty()
 
-    def set_control_point1(self, position, delta=None):
-        """Set the first control point position"""
+    def set_control_point1(self, position, delta=None, link_cps=False):
+        """
+        Set the first control point position.
+
+        Args:
+            position: New CP1 position
+            delta: Movement delta (if None, calculated from old position)
+            link_cps: If True, sync connected CPs for C1 continuity (smooth spline)
+        """
         old_cp1 = self.control_point1.copy() if delta is None else None
         self.control_point1 = np.array(position, dtype=float)
         self._mark_geometry_dirty()
@@ -1584,14 +1598,23 @@ class Strand:
         if delta is None:
             delta = self.control_point1 - old_cp1
 
-        # Sync attached strands at start (attachment_side == 0) - mirror movement
-        for attached in self.attached_strands:
-            if hasattr(attached, 'attachment_side') and attached.attachment_side == 0:
-                if hasattr(attached, 'sync_cp1_with_parent'):
-                    attached.sync_cp1_with_parent(delta)
+        # Only sync attached strands if link_cps is enabled
+        if link_cps:
+            # Sync attached strands at start (attachment_side == 0) using true C1 symmetry
+            for attached in self.attached_strands:
+                if hasattr(attached, 'attachment_side') and attached.attachment_side == 0:
+                    if hasattr(attached, 'sync_cp1_with_parent_c1'):
+                        attached.sync_cp1_with_parent_c1()
 
-    def set_control_point2(self, position, delta=None):
-        """Set the second control point position"""
+    def set_control_point2(self, position, delta=None, link_cps=False):
+        """
+        Set the second control point position.
+
+        Args:
+            position: New CP2 position
+            delta: Movement delta (if None, calculated from old position)
+            link_cps: If True, sync connected CPs for C1 continuity (smooth spline)
+        """
         old_cp2 = self.control_point2.copy() if delta is None else None
         self.control_point2 = np.array(position, dtype=float)
         self._mark_geometry_dirty()
@@ -1600,14 +1623,22 @@ class Strand:
         if delta is None:
             delta = self.control_point2 - old_cp2
 
-        # Sync attached strands at end (attachment_side == 1) - mirror movement
-        for attached in self.attached_strands:
-            if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
-                if hasattr(attached, 'sync_cp1_with_parent'):
-                    attached.sync_cp1_with_parent(delta)
+        # Only sync attached strands if link_cps is enabled
+        if link_cps:
+            # Sync attached strands at end (attachment_side == 1) using true C1 symmetry
+            for attached in self.attached_strands:
+                if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
+                    if hasattr(attached, 'sync_cp1_with_parent_c1'):
+                        attached.sync_cp1_with_parent_c1()
 
-    def set_start(self, position):
-        """Set the start position (2D-style: only move control points if coincident)"""
+    def set_start(self, position, link_cps=False):
+        """
+        Set the start position (2D-style: only move control points if coincident).
+
+        Args:
+            position: New start position
+            link_cps: If True, sync connected CPs for C1 continuity
+        """
         old_start = self.start.copy()
         new_start = np.array(position, dtype=float)
 
@@ -1626,11 +1657,18 @@ class Strand:
             if hasattr(attached, 'attachment_side') and attached.attachment_side == 0:
                 if hasattr(attached, 'update_start_from_parent'):
                     attached.update_start_from_parent()
-                if hasattr(attached, 'sync_cp1_with_parent'):
-                    attached.sync_cp1_with_parent()
+                # Only sync CPs if link_cps is enabled
+                if link_cps and hasattr(attached, 'sync_cp1_with_parent_c1'):
+                    attached.sync_cp1_with_parent_c1()
 
-    def set_end(self, position):
-        """Set the end position (2D-style: only move control points if coincident)"""
+    def set_end(self, position, link_cps=False):
+        """
+        Set the end position (2D-style: only move control points if coincident).
+
+        Args:
+            position: New end position
+            link_cps: If True, sync connected CPs for C1 continuity
+        """
         old_end = self.end.copy()
         new_end = np.array(position, dtype=float)
 
@@ -1649,8 +1687,9 @@ class Strand:
             if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
                 if hasattr(attached, 'update_start_from_parent'):
                     attached.update_start_from_parent()
-                if hasattr(attached, 'sync_cp1_with_parent'):
-                    attached.sync_cp1_with_parent()
+                # Only sync CPs if link_cps is enabled
+                if link_cps and hasattr(attached, 'sync_cp1_with_parent_c1'):
+                    attached.sync_cp1_with_parent_c1()
 
     def move(self, delta):
         """Move the entire strand by delta"""

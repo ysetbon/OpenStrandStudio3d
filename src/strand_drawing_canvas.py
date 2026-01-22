@@ -63,8 +63,12 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self.moving_control_point = None  # 'start', 'end', 'cp1', 'cp2', or None for whole strand
         self.move_start_pos = None  # 3D position where drag started
         self.hovered_control_point = None  # Which control point is hovered: 'start', 'end', 'cp1', 'cp2'
+        self.hovered_strand_for_move = None  # Which strand the hovered CP belongs to (for Edit All mode)
+        self.hovered_twist_ring_strand = None  # Which strand the hovered twist ring belongs to (for Edit All mode)
         self.control_point_box_size = 0.375  # Size of control point boxes (1.5x)
         self.move_axis_mode = "normal"  # normal (XZ), vertical (Y), depth (camera), along (other point)
+        self.link_control_points = False  # When True, linked CPs sync for C1 continuity; when False, CPs are independent
+        self.move_edit_all = False  # When True, show CPs for all strands and allow moving any strand
 
         # Attach mode state
         self.attaching = False
@@ -502,6 +506,19 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             else:
                 lod = self._get_lod_for_strand(self.hovered_strand, camera_pos)
             self.hovered_strand.draw_hover_highlight(lod=lod)
+
+        # In Edit All mode, highlight the strand being moved or hovered for move
+        if self.current_mode == "move" and getattr(self, 'move_edit_all', False):
+            # Prioritize moving strand, then hovered strand for move
+            edit_all_strand = getattr(self, 'moving_strand', None) or getattr(self, 'hovered_strand_for_move', None)
+            if (edit_all_strand and edit_all_strand.visible and
+                    edit_all_strand != self.selected_strand):
+                if self._should_use_drag_lod(edit_all_strand, drag_roots):
+                    lod = self._get_drag_lod_for_strand(edit_all_strand, camera_pos, force_drag=True)
+                else:
+                    lod = self._get_lod_for_strand(edit_all_strand, camera_pos)
+                # Draw a red highlight for the strand being edited in Edit All mode
+                edit_all_strand.draw_edit_all_highlight(lod=lod)
 
     def _get_camera_position(self):
         """Return current camera position in world space."""
@@ -1000,6 +1017,26 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         if mode not in valid_modes:
             return
         self.move_axis_mode = mode
+
+    def set_link_control_points(self, enabled: bool):
+        """
+        Set whether control points at connections are linked.
+
+        When enabled (True): Moving one CP syncs the connected CP for C1 continuity (smooth spline).
+        When disabled (False): Control points are independent (default).
+        """
+        self.link_control_points = enabled
+        self.update()
+
+    def set_move_edit_all(self, enabled: bool):
+        """
+        Set whether to show and allow editing control points for all strands.
+
+        When enabled (True): Show CPs for all strands and allow moving any strand's CPs.
+        When disabled (False): Only show CPs for the selected strand (default).
+        """
+        self.move_edit_all = enabled
+        self.update()
 
     def _get_move_axis_modifiers(self, shift_held: bool, ctrl_held: bool):
         """Return effective modifier flags based on selected move axis mode."""

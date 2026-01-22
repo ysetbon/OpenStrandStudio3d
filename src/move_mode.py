@@ -47,11 +47,21 @@ class MoveModeMixin:
 
         Normal mode: Show CPs for ALL visible strands (green sphere/cone + dashes, no boxes)
         Move mode: Show CPs only for SELECTED strand (with red/yellow boxes)
+        Move mode + Edit All: Show CPs with boxes for ALL visible strands
         """
         if self.current_mode == "move":
-            # Move mode: only selected strand with boxes
-            if self.selected_strand is not None and self.selected_strand.visible:
-                self._draw_strand_control_points(self.selected_strand, show_boxes=True)
+            # Check if Edit All mode is enabled
+            edit_all = getattr(self, 'move_edit_all', False)
+
+            if edit_all:
+                # Edit All mode: show CPs with boxes for ALL visible strands
+                for strand in self.strands:
+                    if strand.visible:
+                        self._draw_strand_control_points(strand, show_boxes=True)
+            else:
+                # Normal move mode: only selected strand with boxes
+                if self.selected_strand is not None and self.selected_strand.visible:
+                    self._draw_strand_control_points(self.selected_strand, show_boxes=True)
         else:
             # Normal mode: all visible strands without boxes
             for strand in self.strands:
@@ -258,33 +268,34 @@ class MoveModeMixin:
         RED_IDLE = (0.9, 0.2, 0.2, 0.4)      # Semi-transparent red
         YELLOW_ACTIVE = (1.0, 1.0, 0.0, 0.5)  # Semi-transparent yellow
 
+        # Check if THIS strand is the one being hovered or moved
+        hovered_strand = getattr(self, 'hovered_strand_for_move', None)
+        is_this_strand_hovered = (strand == hovered_strand)
+        is_this_strand_moving = (strand == self.moving_strand)
+
         # Start point box
-        if self.hovered_control_point == 'start' or (is_dragging and self.moving_control_point == 'start'):
-            self._draw_box(strand.start, box_size, YELLOW_ACTIVE)
-        else:
-            self._draw_box(strand.start, box_size, RED_IDLE)
+        is_start_active = ((is_this_strand_hovered and self.hovered_control_point == 'start') or
+                          (is_this_strand_moving and self.moving_control_point == 'start'))
+        self._draw_box(strand.start, box_size, YELLOW_ACTIVE if is_start_active else RED_IDLE)
 
         # End point box
-        if self.hovered_control_point == 'end' or (is_dragging and self.moving_control_point == 'end'):
-            self._draw_box(strand.end, box_size, YELLOW_ACTIVE)
-        else:
-            self._draw_box(strand.end, box_size, RED_IDLE)
+        is_end_active = ((is_this_strand_hovered and self.hovered_control_point == 'end') or
+                        (is_this_strand_moving and self.moving_control_point == 'end'))
+        self._draw_box(strand.end, box_size, YELLOW_ACTIVE if is_end_active else RED_IDLE)
 
         # Control point boxes (only if NOT in straight mode)
         if not straight_mode:
             cp_box_size = box_size * 0.8
 
             # CP1 box
-            if self.hovered_control_point == 'cp1' or (is_dragging and self.moving_control_point == 'cp1'):
-                self._draw_box(strand.control_point1, cp_box_size, YELLOW_ACTIVE)
-            else:
-                self._draw_box(strand.control_point1, cp_box_size, RED_IDLE)
+            is_cp1_active = ((is_this_strand_hovered and self.hovered_control_point == 'cp1') or
+                            (is_this_strand_moving and self.moving_control_point == 'cp1'))
+            self._draw_box(strand.control_point1, cp_box_size, YELLOW_ACTIVE if is_cp1_active else RED_IDLE)
 
             # CP2 box
-            if self.hovered_control_point == 'cp2' or (is_dragging and self.moving_control_point == 'cp2'):
-                self._draw_box(strand.control_point2, cp_box_size, YELLOW_ACTIVE)
-            else:
-                self._draw_box(strand.control_point2, cp_box_size, RED_IDLE)
+            is_cp2_active = ((is_this_strand_hovered and self.hovered_control_point == 'cp2') or
+                            (is_this_strand_moving and self.moving_control_point == 'cp2'))
+            self._draw_box(strand.control_point2, cp_box_size, YELLOW_ACTIVE if is_cp2_active else RED_IDLE)
 
         # Draw twist rings around all control point boxes
         self._draw_twist_rings_for_strand(strand, box_size)
@@ -391,13 +402,19 @@ class MoveModeMixin:
         ring_radius = box_size * self.TWIST_RING_RADIUS_FACTOR
 
         # Determine color based on hover/drag state
+        # Must check both the point name AND the strand to avoid highlighting wrong strands
         hovered_ring = getattr(self, 'hovered_twist_ring', None)
+        hovered_ring_strand = getattr(self, 'hovered_twist_ring_strand', None)
         dragging_ring = getattr(self, 'dragging_twist_ring', None)
+        dragging_ring_strand = getattr(self, 'twist_drag_strand', None)
 
-        if dragging_ring == point_name:
+        is_this_ring_dragging = (dragging_ring == point_name and dragging_ring_strand == strand)
+        is_this_ring_hovered = (hovered_ring == point_name and hovered_ring_strand == strand)
+
+        if is_this_ring_dragging:
             color = self.TWIST_RING_ACTIVE_COLOR
             line_width = self.TWIST_RING_THICKNESS + 1.5
-        elif hovered_ring == point_name:
+        elif is_this_ring_hovered:
             color = self.TWIST_RING_HOVER_COLOR
             line_width = self.TWIST_RING_THICKNESS + 1.0
         else:
@@ -568,77 +585,125 @@ class MoveModeMixin:
 
     def _update_control_point_hover(self, screen_x, screen_y):
         """Update which control point is being hovered"""
-        if not self.selected_strand:
+        edit_all = getattr(self, 'move_edit_all', False)
+
+        # Determine which strands to check
+        if edit_all:
+            # Edit All mode: check all visible strands
+            strands_to_check = [s for s in self.strands if s.visible]
+        else:
+            # Normal mode: only check selected strand
+            if not self.selected_strand:
+                self.hovered_control_point = None
+                self.hovered_strand_for_move = None
+                self.setCursor(Qt.ArrowCursor)
+                return
+            strands_to_check = [self.selected_strand]
+
+        if not strands_to_check:
             self.hovered_control_point = None
+            self.hovered_strand_for_move = None
             self.setCursor(Qt.ArrowCursor)
             return
-
-        strand = self.selected_strand
-
-        # Check each control point box using screen-space distance
-        # In straight mode, only allow hovering over start/end (not cp1/cp2)
-        if self.straight_segment_mode:
-            control_points = {
-                'start': strand.start,
-                'end': strand.end
-            }
-        else:
-            control_points = {
-                'start': strand.start,
-                'end': strand.end,
-                'cp1': strand.control_point1,
-                'cp2': strand.control_point2
-            }
 
         # Screen pixel threshold for hover detection
         min_hover_threshold = 12  # pixels
 
         closest_cp = None
+        closest_strand = None
         closest_dist = float('inf')
 
-        for cp_name, cp_pos in control_points.items():
-            screen_center = self._project_point_to_screen(cp_pos)
-            if not screen_center:
-                continue
+        for strand in strands_to_check:
+            # Build control points dict for this strand
+            # In straight mode, only allow hovering over start/end (not cp1/cp2)
+            if self.straight_segment_mode:
+                control_points = {
+                    'start': strand.start,
+                    'end': strand.end
+                }
+            else:
+                control_points = {
+                    'start': strand.start,
+                    'end': strand.end,
+                    'cp1': strand.control_point1,
+                    'cp2': strand.control_point2
+                }
 
-            box_size = self.control_point_box_size
-            if cp_name in ('cp1', 'cp2'):
-                box_size *= 0.8
+            for cp_name, cp_pos in control_points.items():
+                screen_center = self._project_point_to_screen(cp_pos)
+                if not screen_center:
+                    continue
 
-            half = box_size / 2.0
-            max_radius = 0.0
-            for sx in (-1.0, 1.0):
-                for sy in (-1.0, 1.0):
-                    for sz in (-1.0, 1.0):
-                        offset = np.array([sx * half, sy * half, sz * half])
-                        screen_offset = self._project_point_to_screen(cp_pos + offset)
-                        if not screen_offset:
-                            continue
-                        dx = screen_offset[0] - screen_center[0]
-                        dy = screen_offset[1] - screen_center[1]
-                        dist = math.sqrt(dx * dx + dy * dy)
-                        if dist > max_radius:
-                            max_radius = dist
+                box_size = self.control_point_box_size
+                if cp_name in ('cp1', 'cp2'):
+                    box_size *= 0.8
 
-            hover_threshold = max(min_hover_threshold, max_radius)
-            dx = screen_center[0] - screen_x
-            dy = screen_center[1] - screen_y
-            screen_dist = math.sqrt(dx * dx + dy * dy)
-            if screen_dist < hover_threshold and screen_dist < closest_dist:
-                closest_dist = screen_dist
-                closest_cp = cp_name
+                half = box_size / 2.0
+                max_radius = 0.0
+                for sx in (-1.0, 1.0):
+                    for sy in (-1.0, 1.0):
+                        for sz in (-1.0, 1.0):
+                            offset = np.array([sx * half, sy * half, sz * half])
+                            screen_offset = self._project_point_to_screen(cp_pos + offset)
+                            if not screen_offset:
+                                continue
+                            dx = screen_offset[0] - screen_center[0]
+                            dy = screen_offset[1] - screen_center[1]
+                            dist = math.sqrt(dx * dx + dy * dy)
+                            if dist > max_radius:
+                                max_radius = dist
+
+                hover_threshold = max(min_hover_threshold, max_radius)
+                dx = screen_center[0] - screen_x
+                dy = screen_center[1] - screen_y
+                screen_dist = math.sqrt(dx * dx + dy * dy)
+                if screen_dist < hover_threshold and screen_dist < closest_dist:
+                    closest_dist = screen_dist
+                    closest_cp = cp_name
+                    closest_strand = strand
 
         self.hovered_control_point = closest_cp
+        self.hovered_strand_for_move = closest_strand  # Track which strand the hovered CP belongs to
 
         # Check for twist ring hover (only if not hovering over a box)
         # Skip for circular cross-sections (rotation has no visible effect)
         hovered_ring = None
+        hovered_ring_strand = None
         if not self.hovered_control_point:
-            if getattr(strand, 'cross_section_shape', 'ellipse') != 'circle':
-                hovered_ring = self._check_twist_ring_hover(screen_x, screen_y, strand, control_points)
+            if edit_all:
+                # Edit All mode: check twist rings for ALL visible strands
+                for strand in strands_to_check:
+                    if getattr(strand, 'cross_section_shape', 'ellipse') == 'circle':
+                        continue
+                    if self.straight_segment_mode:
+                        control_points = {'start': strand.start, 'end': strand.end}
+                    else:
+                        control_points = {
+                            'start': strand.start, 'end': strand.end,
+                            'cp1': strand.control_point1, 'cp2': strand.control_point2
+                        }
+                    ring = self._check_twist_ring_hover(screen_x, screen_y, strand, control_points)
+                    if ring:
+                        hovered_ring = ring
+                        hovered_ring_strand = strand
+                        break  # Found a ring, stop checking
+            elif closest_strand:
+                # Normal mode: only check the closest strand
+                strand = closest_strand
+                if self.straight_segment_mode:
+                    control_points = {'start': strand.start, 'end': strand.end}
+                else:
+                    control_points = {
+                        'start': strand.start, 'end': strand.end,
+                        'cp1': strand.control_point1, 'cp2': strand.control_point2
+                    }
+                if getattr(strand, 'cross_section_shape', 'ellipse') != 'circle':
+                    hovered_ring = self._check_twist_ring_hover(screen_x, screen_y, strand, control_points)
+                    hovered_ring_strand = strand if hovered_ring else None
 
-        # Store the hovered ring state
+        # Store the hovered ring state and which strand it belongs to
         self.hovered_twist_ring = hovered_ring
+        self.hovered_twist_ring_strand = hovered_ring_strand
 
         # Update cursor based on hover state
         if self.hovered_control_point:
@@ -770,13 +835,22 @@ class MoveModeMixin:
 
     def _start_move(self, screen_x, screen_y):
         """Start moving strand or control point - only works when clicking on a control point box"""
-        if not self.selected_strand:
-            # Try to select a strand first
-            self._try_select_strand(screen_x, screen_y)
-            if not self.selected_strand:
-                return
+        edit_all = getattr(self, 'move_edit_all', False)
 
-        strand = self.selected_strand
+        # Determine which strand to use
+        if edit_all:
+            # Edit All mode: use the strand whose CP is being hovered
+            strand = getattr(self, 'hovered_strand_for_move', None)
+            if not strand:
+                return
+        else:
+            # Normal mode: use selected strand
+            if not self.selected_strand:
+                # Try to select a strand first
+                self._try_select_strand(screen_x, screen_y)
+                if not self.selected_strand:
+                    return
+            strand = self.selected_strand
 
         # Only allow movement if clicking on a control point box
         if not self.hovered_control_point:
@@ -897,52 +971,96 @@ class MoveModeMixin:
 
         # Apply delta to the appropriate point and propagate to connected strands
         # (2D-style: save and restore non-moving endpoints to prevent drift)
+        # Check if control points should be linked for C1 continuity
+        link_cps = getattr(self, 'link_control_points', False)
+        edit_all = getattr(self, 'move_edit_all', False)
+
+        # In Edit All mode, we move ONLY the single point without propagating to connected strands
+        # This allows independent movement of any control point
+
         if self.moving_control_point == 'start':
-            # Save non-moving endpoint before modification
-            original_end = strand.end.copy()
-            strand.set_start(strand.start + delta)
-            # Restore non-moving endpoint (matches 2D behavior)
-            strand.end = original_end
-            strand._mark_geometry_dirty()
-            # Propagate to connected strand at start
-            self._move_connected_strands(strand, 'start', delta)
-            # In straight mode, re-straighten the strand after movement
+            if edit_all:
+                # Edit All mode: move this point and connected strand's endpoint ONLY
+                strand.start = strand.start + delta
+                strand._mark_geometry_dirty()
+                # Also move connected strand's end point (if this is an AttachedStrand)
+                if hasattr(strand, 'parent_strand') and hasattr(strand, 'attachment_side'):
+                    parent = strand.parent_strand
+                    if strand.attachment_side == 0:
+                        # Connected to parent's start
+                        parent.start = parent.start + delta
+                    else:
+                        # Connected to parent's end
+                        parent.end = parent.end + delta
+                    parent._mark_geometry_dirty()
+                    if hasattr(self, "_add_drag_lod_target"):
+                        self._add_drag_lod_target(parent)
+            else:
+                # Normal mode: save/restore and propagate
+                original_end = strand.end.copy()
+                strand.set_start(strand.start + delta, link_cps=link_cps)
+                strand.end = original_end
+                strand._mark_geometry_dirty()
+                self._move_connected_strands(strand, 'start', delta)
             if self.straight_segment_mode:
                 strand.make_straight()
         elif self.moving_control_point == 'end':
-            # Save non-moving endpoint before modification
-            original_start = strand.start.copy()
-            strand.set_end(strand.end + delta)
-            # Restore non-moving endpoint (matches 2D behavior)
-            strand.start = original_start
-            strand._mark_geometry_dirty()
-            # Propagate to connected strand at end
-            self._move_connected_strands(strand, 'end', delta)
-            # In straight mode, re-straighten the strand after movement
+            if edit_all:
+                # Edit All mode: move this point and connected strands' start points ONLY
+                strand.end = strand.end + delta
+                strand._mark_geometry_dirty()
+                # Also move connected attached strands' start points (not whole strand)
+                for attached in strand.attached_strands:
+                    if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
+                        # This attached strand's start is connected to our end
+                        attached.start = attached.start + delta
+                        attached._mark_geometry_dirty()
+                        if hasattr(self, "_add_drag_lod_target"):
+                            self._add_drag_lod_target(attached)
+            else:
+                # Normal mode: save/restore and propagate
+                original_start = strand.start.copy()
+                strand.set_end(strand.end + delta, link_cps=link_cps)
+                strand.start = original_start
+                strand._mark_geometry_dirty()
+                self._move_connected_strands(strand, 'end', delta)
             if self.straight_segment_mode:
                 strand.make_straight()
         elif self.moving_control_point == 'cp1':
-            # Use setter to trigger C1 continuity sync with parent and children
-            strand.set_control_point1(strand.control_point1 + delta, delta=delta)
-            # If this is an AttachedStrand, also sync parent's control point (mirror movement)
-            if hasattr(strand, 'sync_parent_cp_with_our_cp1'):
-                strand.sync_parent_cp_with_our_cp1(delta)
-                # Add parent to LOD targets so it renders with updated geometry
-                if hasattr(strand, 'parent_strand') and hasattr(self, "_add_drag_lod_target"):
-                    self._add_drag_lod_target(strand.parent_strand)
-            # Also add any attached strands at start (side=0) to LOD targets
-            for attached in strand.attached_strands:
-                if hasattr(attached, 'attachment_side') and attached.attachment_side == 0:
-                    if hasattr(self, "_add_drag_lod_target"):
-                        self._add_drag_lod_target(attached)
+            # Move CP1
+            strand.control_point1 = strand.control_point1 + delta
+            strand._mark_geometry_dirty()
+
+            # If Link CPs is enabled, sync connected CPs for C1 continuity
+            # This works regardless of Edit All mode
+            if link_cps:
+                # If this is an AttachedStrand, sync parent's CP
+                if hasattr(strand, 'sync_parent_cp_with_our_cp1_c1'):
+                    strand.sync_parent_cp_with_our_cp1_c1()
+                    if hasattr(strand, 'parent_strand') and hasattr(self, "_add_drag_lod_target"):
+                        self._add_drag_lod_target(strand.parent_strand)
+                # Sync any attached strands at start (side=0)
+                for attached in strand.attached_strands:
+                    if hasattr(attached, 'attachment_side') and attached.attachment_side == 0:
+                        if hasattr(attached, 'sync_cp1_with_parent_c1'):
+                            attached.sync_cp1_with_parent_c1()
+                        if hasattr(self, "_add_drag_lod_target"):
+                            self._add_drag_lod_target(attached)
+
         elif self.moving_control_point == 'cp2':
-            # Use setter to trigger C1 continuity sync with attached strands (mirror movement)
-            strand.set_control_point2(strand.control_point2 + delta, delta=delta)
-            # Add attached strands at end (side=1) to LOD targets so they render with updated geometry
-            for attached in strand.attached_strands:
-                if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
-                    if hasattr(self, "_add_drag_lod_target"):
-                        self._add_drag_lod_target(attached)
+            # Move CP2
+            strand.control_point2 = strand.control_point2 + delta
+            strand._mark_geometry_dirty()
+
+            # If Link CPs is enabled, sync attached strands' CP1 for C1 continuity
+            # This works regardless of Edit All mode
+            if link_cps:
+                for attached in strand.attached_strands:
+                    if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
+                        if hasattr(attached, 'sync_cp1_with_parent_c1'):
+                            attached.sync_cp1_with_parent_c1()
+                        if hasattr(self, "_add_drag_lod_target"):
+                            self._add_drag_lod_target(attached)
         else:
             # Move whole strand
             strand.move(delta)
@@ -1248,11 +1366,21 @@ class MoveModeMixin:
         Returns:
             True if twist drag started, False otherwise
         """
-        if not self.selected_strand:
+        edit_all = getattr(self, 'move_edit_all', False)
+
+        # Determine which strand to use
+        if edit_all:
+            # Edit All mode: use the strand whose twist ring is hovered
+            strand = getattr(self, 'hovered_twist_ring_strand', None)
+        else:
+            # Normal mode: use selected strand
+            strand = self.selected_strand
+
+        if not strand:
             return False
 
         # Skip for circular cross-sections (rotation has no visible effect)
-        if getattr(self.selected_strand, 'cross_section_shape', 'ellipse') == 'circle':
+        if getattr(strand, 'cross_section_shape', 'ellipse') == 'circle':
             return False
 
         # Check if we're hovering over a twist ring
@@ -1266,13 +1394,14 @@ class MoveModeMixin:
 
         # Initialize twist drag state
         self.dragging_twist_ring = hovered_ring
+        self.twist_drag_strand = strand  # Track which strand is being twisted
         self.twist_drag_start_x = screen_x
         self.twist_drag_last_x = screen_x
         self.twist_drag_start_screen_pos = (screen_x, screen_y)
-        self.twist_drag_start_angle = self.selected_strand.get_twist(hovered_ring)
+        self.twist_drag_start_angle = strand.get_twist(hovered_ring)
         self.twist_drag_total_angle = 0.0
 
-        print(f"Twist: Started twisting {hovered_ring} of {self.selected_strand.name}")
+        print(f"Twist: Started twisting {hovered_ring} of {strand.name}")
         self.update()
         return True
 
@@ -1289,7 +1418,8 @@ class MoveModeMixin:
             True if twist was updated, False otherwise
         """
         dragging_ring = getattr(self, 'dragging_twist_ring', None)
-        if not dragging_ring or not self.selected_strand:
+        strand = getattr(self, 'twist_drag_strand', None)
+        if not dragging_ring or not strand:
             return False
 
         # Calculate horizontal movement
@@ -1302,9 +1432,9 @@ class MoveModeMixin:
         angle_delta = screen_dx * angle_speed
 
         # Update the twist angle
-        current_angle = self.selected_strand.get_twist(dragging_ring)
+        current_angle = strand.get_twist(dragging_ring)
         new_angle = current_angle + angle_delta
-        self.selected_strand.set_twist(dragging_ring, new_angle)
+        strand.set_twist(dragging_ring, new_angle)
 
         self.twist_drag_total_angle += angle_delta
 
@@ -1323,10 +1453,13 @@ class MoveModeMixin:
             return False
 
         total_angle = getattr(self, 'twist_drag_total_angle', 0.0)
-        print(f"Twist: Finished twisting {dragging_ring} (delta: {total_angle:.1f}°)")
+        strand = getattr(self, 'twist_drag_strand', None)
+        strand_name = strand.name if strand else "unknown"
+        print(f"Twist: Finished twisting {dragging_ring} of {strand_name} (delta: {total_angle:.1f}°)")
 
         # Clear twist drag state
         self.dragging_twist_ring = None
+        self.twist_drag_strand = None
         self.twist_drag_start_x = None
         self.twist_drag_last_x = None
         self.twist_drag_start_screen_pos = None
