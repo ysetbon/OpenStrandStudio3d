@@ -101,11 +101,6 @@ class MainWindow(QMainWindow):
         self.action_load.triggered.connect(self._load_project)
         toolbar.addAction(self.action_load)
 
-        # Clear all strands
-        self.action_clear_all = QAction("Clear All", self)
-        self.action_clear_all.triggered.connect(self._clear_all_strands)
-        toolbar.addAction(self.action_clear_all)
-
         toolbar.addSeparator()
 
         # === Undo/Redo ===
@@ -424,6 +419,7 @@ class MainWindow(QMainWindow):
         self.layer_panel.set_rotate_requested.connect(self._on_set_rotate_requested)
         self.layer_panel.deselect_all_requested.connect(self.canvas.deselect_all)
         self.layer_panel.add_strand_requested.connect(lambda: self._set_mode("add_strand"))
+        self.layer_panel.draw_names_requested.connect(self.canvas.toggle_name_drawing)
 
     def _apply_dark_theme(self):
         """Apply dark theme styling to the main window"""
@@ -797,14 +793,6 @@ class MainWindow(QMainWindow):
         self.current_project_file = None
         self.setWindowTitle("OpenStrandStudio 3D - New Project")
         self.statusbar.showMessage("New project created", 3000)
-
-    def _clear_all_strands(self):
-        """Clear all strands from the canvas"""
-        # Save state before clearing for undo
-        self.undo_redo_manager.save_state()
-        self.canvas.clear_project()
-        self.layer_panel.clear()
-        self.statusbar.showMessage("Cleared all strands", 3000)
 
     def _save_project(self):
         """Save the project to a JSON file"""

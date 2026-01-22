@@ -547,6 +547,7 @@ class LayerPanel(QWidget):
     set_rotate_requested = pyqtSignal(str)      # set number
     deselect_all_requested = pyqtSignal()       # deselect all strands
     add_strand_requested = pyqtSignal()         # request to enter add strand mode
+    draw_names_requested = pyqtSignal(bool)     # toggle drawing of strand names
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -554,6 +555,7 @@ class LayerPanel(QWidget):
         self.layer_buttons = {}  # name -> LayerButton
         self.set_groups = {}     # set_number -> SetGroup
         self.selected_strand = None
+        self.should_draw_names = False  # Toggle for drawing strand names
 
         self._setup_ui()
 
@@ -631,6 +633,27 @@ class LayerPanel(QWidget):
 
         # Bottom buttons
         buttons_layout2 = QHBoxLayout()
+
+        self.btn_draw_names = QPushButton("Draw Names")
+        self.btn_draw_names.clicked.connect(self._request_draw_names)
+        self.btn_draw_names.setStyleSheet("""
+            QPushButton {
+                background-color: #3D2848;
+                border: 1px solid #E07BDB;
+                border-radius: 4px;
+                padding: 5px 10px;
+                color: #E07BDB;
+            }
+            QPushButton:hover {
+                background-color: #4D3858;
+                border-color: #E694E2;
+                color: #E694E2;
+            }
+            QPushButton:pressed {
+                background-color: #2D1838;
+            }
+        """)
+        buttons_layout2.addWidget(self.btn_draw_names)
 
         self.btn_deselect_all = QPushButton("Deselect All")
         self.btn_deselect_all.clicked.connect(self._deselect_all)
@@ -878,6 +901,49 @@ class LayerPanel(QWidget):
     def _on_set_rotate_requested(self, set_number: str):
         """Forward set-level rotation requests to the main window."""
         self.set_rotate_requested.emit(set_number)
+
+    def _request_draw_names(self):
+        """Toggle the drawing of strand names and emit the corresponding signal."""
+        self.should_draw_names = not self.should_draw_names
+        self.draw_names_requested.emit(self.should_draw_names)
+
+        # Update button style to show active state
+        if self.should_draw_names:
+            self.btn_draw_names.setStyleSheet("""
+                QPushButton {
+                    background-color: #E07BDB;
+                    border: 1px solid #E07BDB;
+                    border-radius: 4px;
+                    padding: 5px 10px;
+                    color: #1E1E1E;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #E694E2;
+                    border-color: #E694E2;
+                }
+                QPushButton:pressed {
+                    background-color: #BA62B5;
+                }
+            """)
+        else:
+            self.btn_draw_names.setStyleSheet("""
+                QPushButton {
+                    background-color: #3D2848;
+                    border: 1px solid #E07BDB;
+                    border-radius: 4px;
+                    padding: 5px 10px;
+                    color: #E07BDB;
+                }
+                QPushButton:hover {
+                    background-color: #4D3858;
+                    border-color: #E694E2;
+                    color: #E694E2;
+                }
+                QPushButton:pressed {
+                    background-color: #2D1838;
+                }
+            """)
 
     def clear(self):
         """Remove all layer buttons and set groups"""

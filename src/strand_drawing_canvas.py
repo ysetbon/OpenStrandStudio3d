@@ -8,7 +8,7 @@ import time
 import numpy as np
 from PyQt5.QtWidgets import QOpenGLWidget
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint
-from PyQt5.QtGui import QMouseEvent, QWheelEvent, QKeyEvent
+from PyQt5.QtGui import QMouseEvent, QWheelEvent, QKeyEvent, QPainter, QFont, QColor, QPen, QPainterPath
 
 from OpenGL.GL import *
 from OpenGL.GLU import *
@@ -180,6 +180,9 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         # Set focus policy for keyboard input
         self.setFocusPolicy(Qt.StrongFocus)
 
+        # Draw strand names flag
+        self.should_draw_names = False
+
     def initializeGL(self):
         """Initialize OpenGL settings"""
         glClearColor(*self.background_color)
@@ -302,6 +305,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         # Draw rigid points (start/end spheres) if enabled
         if self.show_rigid_points:
             self._draw_rigid_points()
+
+        # Draw strand labels if enabled (2D overlay)
+        if self.should_draw_names:
+            self._draw_strand_labels()
 
     def _setup_camera(self):
         """Setup the camera view matrix"""
@@ -699,6 +706,76 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                 # Regular strand - draw at both start and end
                 self._draw_sphere(strand.start, self.rigid_sphere_radius, color)
                 self._draw_sphere(strand.end, self.rigid_sphere_radius, color)
+
+    def _draw_strand_labels(self):
+        """Draw strand names as 2D text overlays at the center of each strand."""
+        # Finish OpenGL rendering before starting QPainter
+        glFinish()
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.TextAntialiasing)
+
+        # Set up font
+        font = QFont("Arial", 12, QFont.Bold)
+        painter.setFont(font)
+
+        for strand in self.strands:
+            if not strand.visible:
+                continue
+
+            # Calculate strand center (midpoint between start and end)
+            center = (strand.start + strand.end) / 2
+
+            # Project 3D center to 2D screen coordinates
+            screen_pos = self._project_point_to_screen(center)
+            if screen_pos is None:
+                continue
+
+            screen_x, screen_y = screen_pos
+
+            # Get strand name
+            text = strand.name
+
+            # Calculate text metrics
+            metrics = painter.fontMetrics()
+            text_width = metrics.horizontalAdvance(text)
+            text_height = metrics.height()
+
+            # Calculate text position (centered)
+            text_x = screen_x - text_width / 2
+            text_y = screen_y + text_height / 4
+
+            # Create text path for outline effect
+            text_path = QPainterPath()
+            text_path.addText(text_x, text_y, font, text)
+
+            # Draw white outline (stroke)
+            outline_pen = QPen(QColor(255, 255, 255), 4)
+            outline_pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(outline_pen)
+            painter.drawPath(text_path)
+
+            # Draw black text fill
+            painter.setPen(QPen(QColor(0, 0, 0), 1))
+            painter.fillPath(text_path, QColor(0, 0, 0))
+
+        painter.end()
+
+    def toggle_name_drawing(self, should_draw: bool):
+        """Toggle the drawing of strand names."""
+        self.should_draw_names = should_draw
+        self.update()
+
+    def enable_name_drawing(self):
+        """Enable the drawing of strand names."""
+        self.should_draw_names = True
+        self.update()
+
+    def disable_name_drawing(self):
+        """Disable the drawing of strand names."""
+        self.should_draw_names = False
+        self.update()
 
     def _get_mouse_3d_position(self, ground_y=0.0):
         """Convert current mouse position to 3D point on ground plane"""
