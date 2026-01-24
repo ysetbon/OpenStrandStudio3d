@@ -38,7 +38,6 @@ class MainWindow(QMainWindow):
         self._setup_statusbar()
         self._connect_signals()
         self._apply_dark_theme()
-        self._apply_button_styles()
         self._load_user_settings()
 
     def _setup_ui(self):
@@ -504,7 +503,6 @@ class MainWindow(QMainWindow):
         shadow = '#3A7178'      # Darker teal (bottom/right edge)
         checked = '#4A8E96'     # Darker when checked/active
         pressed = '#3D7880'     # Darkest when pressed
-        font = "Söhne, Inter, Segoe UI, sans-serif"
 
         style = f"""
             QToolButton {{
@@ -516,7 +514,6 @@ class MainWindow(QMainWindow):
                 border-radius: 6px;
                 padding: 4px 6px;
                 color: {text_color};
-                font-family: {font};
                 font-size: 11px;
                 font-weight: 500;
             }}

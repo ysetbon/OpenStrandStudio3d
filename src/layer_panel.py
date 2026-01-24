@@ -79,46 +79,31 @@ def _make_card_style(selector, bg_color, text_color, min_width=None, font_weight
 
 PANEL_BUTTON_TEXT = "#FFFFFF"
 
-# Cool Teal style matching the main window toolbar buttons
+# Layer panel buttons styled to match the main toolbar theme.
 TOOLBAR_BUTTON_STYLE = """
     QPushButton {
-        background-color: #5B9EA6;
-        border-top: 1px solid #6EB0B8;
-        border-left: 1px solid #6EB0B8;
-        border-right: 2px solid #3A7178;
-        border-bottom: 2px solid #3A7178;
-        border-radius: 6px;
-        padding: 4px 6px;
-        color: #FFFFFF;
-        font-family: Söhne, Inter, Segoe UI, sans-serif;
+        background-color: #353538;
+        border: 1px solid #3E3E42;
+        border-radius: 4px;
+        padding: 3px 5px;
+        color: #E8E8E8;
         font-size: 11px;
         font-weight: 500;
     }
     QPushButton:hover {
-        background-color: #65A8B0;
-        border-top: 1px solid #75B5BD;
-        border-left: 1px solid #75B5BD;
-        border-right: 2px solid #3A7178;
-        border-bottom: 2px solid #3A7178;
+        background-color: #454548;
+        border-color: #5A5A5D;
     }
     QPushButton:pressed {
-        background-color: #3D7880;
-        border-top: 2px solid #3A7178;
-        border-left: 2px solid #3A7178;
-        border-right: 1px solid #6EB0B8;
-        border-bottom: 1px solid #6EB0B8;
-        padding: 5px 5px 3px 7px;
+        background-color: #2A2A2D;
     }
     QPushButton:checked {
-        background-color: #4A8E96;
-        border-top: 2px solid #3A7178;
-        border-left: 2px solid #3A7178;
-        border-right: 1px solid #6EB0B8;
-        border-bottom: 1px solid #6EB0B8;
-        padding: 5px 5px 3px 7px;
+        background-color: #3D3D50;
+        border: 1px solid #7B68EE;
+        color: #E8E8E8;
     }
     QPushButton:checked:hover {
-        background-color: #65A8B0;
+        background-color: #4A4A60;
     }
 """
 
