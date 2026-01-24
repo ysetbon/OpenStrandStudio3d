@@ -11,8 +11,9 @@ from main_window import MainWindow
 
 
 def main():
-    # Enable high DPI scaling
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    # Disable automatic high-DPI scaling to prevent mouse coordinate mismatch
+    # with OpenGL viewport (same approach as OpenStrand v106)
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, False)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     # Request a higher-quality OpenGL surface (anti-aliasing, depth/stencil).
@@ -29,7 +30,7 @@ def main():
 
     # Create and show main window
     window = MainWindow()
-    window.show()
+    window.showMaximized()
 
     sys.exit(app.exec_())
 

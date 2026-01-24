@@ -14,7 +14,11 @@ class SelectModeMixin:
 
     def _try_select_strand(self, screen_x, screen_y):
         """Select the strand closest to the cursor."""
-        strand = self._find_strand_at_screen(screen_x, screen_y, threshold_px=20.0)
+        # Scale mouse coordinates by device pixel ratio to match viewport
+        dpr = int(self.devicePixelRatioF())
+        screen_x = screen_x * dpr
+        screen_y = screen_y * dpr
+        strand = self._find_strand_at_screen(screen_x, screen_y, threshold_px=20.0 * dpr)
         self.selected_strand = strand
 
         if strand:
@@ -28,7 +32,11 @@ class SelectModeMixin:
 
     def _update_select_hover(self, screen_x, screen_y):
         """Update hover highlight for select mode."""
-        strand = self._find_strand_at_screen(screen_x, screen_y, threshold_px=24.0)
+        # Scale mouse coordinates by device pixel ratio to match viewport
+        dpr = int(self.devicePixelRatioF())
+        screen_x = screen_x * dpr
+        screen_y = screen_y * dpr
+        strand = self._find_strand_at_screen(screen_x, screen_y, threshold_px=24.0 * dpr)
 
         if strand != self.hovered_strand:
             self.hovered_strand = strand
@@ -113,8 +121,9 @@ class SelectModeMixin:
         glPushMatrix()
         glLoadIdentity()
 
-        width = self.width()
-        height = self.height() if self.height() > 0 else 1
+        dpr = int(self.devicePixelRatioF())
+        width = self.width() * dpr
+        height = (self.height() * dpr) if self.height() > 0 else 1
         aspect = width / height
         gluPerspective(45.0, aspect, 0.1, 1000.0)
 

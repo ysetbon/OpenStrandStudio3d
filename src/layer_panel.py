@@ -12,6 +12,116 @@ from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QColor, QPalette
 
 
+def _clamp_channel(value):
+    return max(0, min(255, value))
+
+
+def _shift_hex_color(hex_color, delta):
+    r = int(hex_color[1:3], 16)
+    g = int(hex_color[3:5], 16)
+    b = int(hex_color[5:7], 16)
+    return f"#{_clamp_channel(r + delta):02x}{_clamp_channel(g + delta):02x}{_clamp_channel(b + delta):02x}"
+
+
+def _card_color_variants(bg_color):
+    highlight = _shift_hex_color(bg_color, 15)
+    hover = _shift_hex_color(bg_color, 10)
+    shadow = _shift_hex_color(bg_color, -45)
+    pressed = _shift_hex_color(bg_color, -35)
+    checked = _shift_hex_color(bg_color, -25)
+    return highlight, hover, shadow, pressed, checked
+
+
+def _make_card_style(selector, bg_color, text_color, min_width=None, font_weight=600):
+    highlight, hover, shadow, pressed, checked = _card_color_variants(bg_color)
+    min_width_rule = f"min-width: {min_width}px;" if min_width else ""
+    return f"""
+        {selector} {{
+            background-color: {bg_color};
+            border-top: 1px solid {highlight};
+            border-left: 1px solid {highlight};
+            border-right: 2px solid {shadow};
+            border-bottom: 2px solid {shadow};
+            border-radius: 8px;
+            padding: 5px 8px;
+            color: {text_color};
+            {min_width_rule}
+            font-size: 11px;
+            font-weight: {font_weight};
+        }}
+        {selector}:hover {{
+            background-color: {hover};
+            border-top: 1px solid {bg_color};
+            border-left: 1px solid {bg_color};
+            border-right: 2px solid {shadow};
+            border-bottom: 2px solid {shadow};
+        }}
+        {selector}:pressed {{
+            background-color: {pressed};
+            border-top: 2px solid {shadow};
+            border-left: 2px solid {shadow};
+            border-right: 1px solid {highlight};
+            border-bottom: 1px solid {highlight};
+            padding: 6px 7px 4px 9px;
+        }}
+        {selector}:checked {{
+            background-color: {checked};
+            border-top: 2px solid {shadow};
+            border-left: 2px solid {shadow};
+            border-right: 1px solid {highlight};
+            border-bottom: 1px solid {highlight};
+        }}
+        {selector}:checked:hover {{
+            background-color: {hover};
+        }}
+    """
+
+
+PANEL_BUTTON_TEXT = "#FFFFFF"
+
+# Cool Teal style matching the main window toolbar buttons
+TOOLBAR_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #5B9EA6;
+        border-top: 1px solid #6EB0B8;
+        border-left: 1px solid #6EB0B8;
+        border-right: 2px solid #3A7178;
+        border-bottom: 2px solid #3A7178;
+        border-radius: 6px;
+        padding: 4px 6px;
+        color: #FFFFFF;
+        font-size: 11px;
+        font-weight: 500;
+    }
+    QPushButton:hover {
+        background-color: #65A8B0;
+        border-top: 1px solid #75B5BD;
+        border-left: 1px solid #75B5BD;
+        border-right: 2px solid #3A7178;
+        border-bottom: 2px solid #3A7178;
+    }
+    QPushButton:pressed {
+        background-color: #3D7880;
+        border-top: 2px solid #3A7178;
+        border-left: 2px solid #3A7178;
+        border-right: 1px solid #6EB0B8;
+        border-bottom: 1px solid #6EB0B8;
+        padding: 5px 5px 3px 7px;
+    }
+    QPushButton:checked {
+        background-color: #4A8E96;
+        border-top: 2px solid #3A7178;
+        border-left: 2px solid #3A7178;
+        border-right: 1px solid #6EB0B8;
+        border-bottom: 1px solid #6EB0B8;
+        padding: 5px 5px 3px 7px;
+    }
+    QPushButton:checked:hover {
+        background-color: #65A8B0;
+    }
+"""
+
+
 class SetGroupHeader(QPushButton):
     """Collapsible header for a set group"""
 
@@ -40,24 +150,32 @@ class SetGroupHeader(QPushButton):
         count_text = f"({self.strand_count})" if self.strand_count > 0 else ""
         self.setText(f"  {arrow}  {self.set_number}  {count_text}")
 
-        self.setStyleSheet("""
-            QPushButton {
-                background-color: #2D2D30;
-                border: none;
+        base_color = "#2D2D30"
+        highlight, hover, shadow, pressed, _ = _card_color_variants(base_color)
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {base_color};
+                border-top: 1px solid {highlight};
                 border-left: 3px solid #7B68EE;
-                border-radius: 4px;
+                border-right: 2px solid {shadow};
+                border-bottom: 2px solid {shadow};
+                border-radius: 8px;
                 color: #E8E8E8;
-                text-align: left;
-                padding-left: 8px;
-                font-weight: bold;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #3A3A3D;
-            }
-            QPushButton:pressed {
-                background-color: #2A2A2D;
-            }
+                padding: 6px 10px;
+                font-weight: 600;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {hover};
+            }}
+            QPushButton:pressed {{
+                background-color: {pressed};
+                border-top: 2px solid {shadow};
+                border-right: 1px solid {highlight};
+                border-bottom: 1px solid {highlight};
+                border-left: 3px solid #7B68EE;
+                padding: 7px 9px 5px 11px;
+            }}
         """)
 
     def _toggle(self):
@@ -198,8 +316,8 @@ class LayerButton(QPushButton):
         self._setup_ui()
 
     def _setup_ui(self):
-        """Setup the button appearance"""
-        self.setFixedHeight(36)
+        """Setup the button appearance (v106 style: flat solid color blocks)"""
+        self.setFixedHeight(34)
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
 
@@ -210,41 +328,46 @@ class LayerButton(QPushButton):
         self.customContextMenuRequested.connect(self._show_context_menu)
 
     def _update_style(self):
-        """Update button style based on state"""
+        """Update button style - flat solid color like v106"""
         # Convert color to QColor (handle both RGB and RGBA)
         r = int(self.strand_color[0] * 255)
         g = int(self.strand_color[1] * 255)
         b = int(self.strand_color[2] * 255)
         a = self.strand_color[3] if len(self.strand_color) > 3 else 1.0
 
-        if self.is_selected:
-            border_color = "#E6A822"  # Warm gold for selected
-            border_width = 2
-        else:
-            border_color = "#3E3E42"
-            border_width = 1
+        alpha = int((a if self.is_visible else a * 0.4) * 255)
 
-        opacity = a if self.is_visible else a * 0.4
+        # V106 style: solid color background, lighter on hover, darker when checked
+        normal = f"rgba({r}, {g}, {b}, {alpha})"
+        lighter = f"rgba({_clamp_channel(r+30)}, {_clamp_channel(g+30)}, {_clamp_channel(b+30)}, {alpha})"
+        darker = f"rgba({_clamp_channel(r-40)}, {_clamp_channel(g-40)}, {_clamp_channel(b-40)}, {alpha})"
+
+        if self.is_selected:
+            border_rule = "border: 2px solid #E6A822;"
+        else:
+            border_rule = "border: none;"
 
         self.setStyleSheet(f"""
             QPushButton {{
-                background-color: rgba({r}, {g}, {b}, {opacity});
-                border: {border_width}px solid {border_color};
-                border-radius: 4px;
-                color: #E8E8E8;
-                text-align: left;
-                padding-left: 10px;
-                font-weight: {'bold' if self.is_selected else 'normal'};
+                background-color: {normal};
+                {border_rule}
+                color: white;
+                padding: 4px 8px;
+                font-size: 12px;
+                font-weight: bold;
             }}
             QPushButton:hover {{
-                border-color: #5A5A5D;
+                background-color: {lighter};
+            }}
+            QPushButton:checked {{
+                background-color: {darker};
+                border: 2px solid #E6A822;
             }}
             QPushButton:pressed {{
-                background-color: rgba({max(0, r-20)}, {max(0, g-20)}, {max(0, b-20)}, {opacity});
+                background-color: {darker};
             }}
         """)
 
-        # Set text (strand name only)
         self.setText(self.strand_name)
 
     def set_selected(self, selected: bool):
@@ -634,88 +757,29 @@ class LayerPanel(QWidget):
         # Bottom buttons
         buttons_layout2 = QHBoxLayout()
 
-        self.btn_draw_names = QPushButton("Draw Names")
-        self.btn_draw_names.clicked.connect(self._request_draw_names)
-        self.btn_draw_names.setStyleSheet("""
-            QPushButton {
-                background-color: #3D2848;
-                border: 1px solid #E07BDB;
-                border-radius: 4px;
-                padding: 5px 10px;
-                color: #E07BDB;
-            }
-            QPushButton:hover {
-                background-color: #4D3858;
-                border-color: #E694E2;
-                color: #E694E2;
-            }
-            QPushButton:pressed {
-                background-color: #2D1838;
-            }
-        """)
+        self.btn_draw_names = QPushButton("Names")
+        self.btn_draw_names.setCheckable(True)
+        self.btn_draw_names.toggled.connect(self._request_draw_names)
+        self.btn_draw_names.setStyleSheet(TOOLBAR_BUTTON_STYLE)
         buttons_layout2.addWidget(self.btn_draw_names)
 
-        self.btn_deselect_all = QPushButton("Deselect All")
+        self.btn_deselect_all = QPushButton("Deselect")
         self.btn_deselect_all.clicked.connect(self._deselect_all)
-        self.btn_deselect_all.setStyleSheet("""
-            QPushButton {
-                background-color: #283040;
-                border: 1px solid #42A5F5;
-                border-radius: 4px;
-                padding: 5px 10px;
-                color: #42A5F5;
-            }
-            QPushButton:hover {
-                background-color: #304050;
-                border-color: #64B5F6;
-            }
-            QPushButton:pressed {
-                background-color: #202830;
-            }
-        """)
+        self.btn_deselect_all.setStyleSheet(TOOLBAR_BUTTON_STYLE)
         buttons_layout2.addWidget(self.btn_deselect_all)
 
-        self.btn_new_strand = QPushButton("New Strand")
+        self.btn_new_strand = QPushButton("New")
         self.btn_new_strand.clicked.connect(self._request_add_strand)
-        self.btn_new_strand.setStyleSheet("""
-            QPushButton {
-                background-color: #2D2848;
-                border: 1px solid #7B68EE;
-                border-radius: 4px;
-                padding: 5px 10px;
-                color: #7B68EE;
-            }
-            QPushButton:hover {
-                background-color: #3D3858;
-                border-color: #9B88FF;
-                color: #9B88FF;
-            }
-            QPushButton:pressed {
-                background-color: #252038;
-            }
-        """)
+        self.btn_new_strand.setStyleSheet(TOOLBAR_BUTTON_STYLE)
         buttons_layout2.addWidget(self.btn_new_strand)
 
         layout.addLayout(buttons_layout2)
 
-        # Apply dark theme
+        # Apply dark theme (no default button style - each button has its own)
         self.setStyleSheet("""
             QWidget {
                 background-color: #252528;
                 color: #E8E8E8;
-            }
-            QPushButton {
-                background-color: #353538;
-                border: 1px solid #3E3E42;
-                border-radius: 4px;
-                padding: 5px 10px;
-                color: #E8E8E8;
-            }
-            QPushButton:hover {
-                background-color: #454548;
-            }
-            QPushButton:pressed {
-                background-color: #2A2A2D;
             }
         """)
 
@@ -902,48 +966,10 @@ class LayerPanel(QWidget):
         """Forward set-level rotation requests to the main window."""
         self.set_rotate_requested.emit(set_number)
 
-    def _request_draw_names(self):
+    def _request_draw_names(self, checked):
         """Toggle the drawing of strand names and emit the corresponding signal."""
-        self.should_draw_names = not self.should_draw_names
+        self.should_draw_names = checked
         self.draw_names_requested.emit(self.should_draw_names)
-
-        # Update button style to show active state
-        if self.should_draw_names:
-            self.btn_draw_names.setStyleSheet("""
-                QPushButton {
-                    background-color: #E07BDB;
-                    border: 1px solid #E07BDB;
-                    border-radius: 4px;
-                    padding: 5px 10px;
-                    color: #1E1E1E;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #E694E2;
-                    border-color: #E694E2;
-                }
-                QPushButton:pressed {
-                    background-color: #BA62B5;
-                }
-            """)
-        else:
-            self.btn_draw_names.setStyleSheet("""
-                QPushButton {
-                    background-color: #3D2848;
-                    border: 1px solid #E07BDB;
-                    border-radius: 4px;
-                    padding: 5px 10px;
-                    color: #E07BDB;
-                }
-                QPushButton:hover {
-                    background-color: #4D3858;
-                    border-color: #E694E2;
-                    color: #E694E2;
-                }
-                QPushButton:pressed {
-                    background-color: #2D1838;
-                }
-            """)
 
     def clear(self):
         """Remove all layer buttons and set groups"""

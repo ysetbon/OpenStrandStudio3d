@@ -54,6 +54,21 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self.selected_strand = None
         self.hovered_strand = None
 
+        # Per-set color palette (like v106 - each set gets a distinct color)
+        self.set_colors = {}  # set_number -> (r, g, b, a) color tuple
+        self._color_palette = [
+            (0.667, 0.333, 1.0, 1.0),   # Purple
+            (0.2, 0.6, 1.0, 1.0),       # Blue
+            (0.2, 0.8, 0.4, 1.0),       # Green
+            (1.0, 0.6, 0.2, 1.0),       # Orange
+            (1.0, 0.3, 0.3, 1.0),       # Red
+            (0.3, 0.85, 0.85, 1.0),     # Cyan
+            (1.0, 0.85, 0.2, 1.0),      # Yellow
+            (0.85, 0.4, 0.7, 1.0),      # Pink
+            (0.5, 0.8, 0.3, 1.0),       # Lime
+            (0.7, 0.5, 0.3, 1.0),       # Brown
+        ]
+
         # Strand creation state
         self.creating_strand = False
         self.new_strand_start = None
@@ -242,7 +257,7 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 96.0)
 
     def resizeGL(self, width, height):
-        """Handle widget resize"""
+        """Handle widget resize - width/height are framebuffer size from Qt"""
         if height == 0:
             height = 1
 
@@ -788,13 +803,18 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         # Make sure we have OpenGL context
         self.makeCurrent()
 
+        # Account for device pixel ratio - mouse coords are logical, viewport is device pixels
+        dpr = int(self.devicePixelRatioF())
+        screen_x = screen_x * dpr
+        screen_y = screen_y * dpr
+
         # Setup matrices (same as in paintGL)
         glMatrixMode(GL_PROJECTION)
         glPushMatrix()
         glLoadIdentity()
 
-        width = self.width()
-        height = self.height() if self.height() > 0 else 1
+        width = self.width() * dpr
+        height = (self.height() * dpr) if self.height() > 0 else 1
         aspect = width / height
         gluPerspective(45.0, aspect, 0.1, 1000.0)
 
@@ -1031,6 +1051,8 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                 self._update_control_point_hover(event.x(), event.y())
             elif self.current_mode == "attach":
                 self._update_attach_point_hover(event.x(), event.y())
+            elif self.current_mode == "rotate" and getattr(self, 'rotate_mode_active', False):
+                self._rotate_mode_mouse_move(event)
 
         self.last_mouse_pos = event.pos()
         if update_needed:
@@ -1332,11 +1354,17 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         set_number = self._get_next_set_number()
         strand_name = f"{set_number}_1"
 
-        # Create strand with default profile settings
+        # Get or assign color for this set
+        if set_number not in self.set_colors:
+            palette_idx = (int(set_number) - 1) % len(self._color_palette)
+            self.set_colors[set_number] = self._color_palette[palette_idx]
+
+        # Create strand with set color and default profile settings
         strand = Strand(
             start=start_arr,
             end=end_arr,
             name=strand_name,
+            color=self.set_colors[set_number],
             width=self.default_strand_width
         )
 
@@ -1504,15 +1532,17 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             self.strand_selected.emit("")
 
     def _project_point_to_screen(self, point_3d):
-        """Project a 3D point to screen coordinates (x, y), or None on failure."""
+        """Project a 3D point to screen coordinates (x, y) in logical pixels, or None on failure."""
         self.makeCurrent()
+
+        dpr = int(self.devicePixelRatioF())
 
         glMatrixMode(GL_PROJECTION)
         glPushMatrix()
         glLoadIdentity()
 
-        width = self.width()
-        height = self.height() if self.height() > 0 else 1
+        width = self.width() * dpr
+        height = (self.height() * dpr) if self.height() > 0 else 1
         aspect = width / height
         gluPerspective(45.0, aspect, 0.1, 1000.0)
 
@@ -1540,7 +1570,8 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             projection = glGetDoublev(GL_PROJECTION_MATRIX)
             projected = gluProject(point_3d[0], point_3d[1], point_3d[2],
                                    modelview, projection, viewport)
-            screen_pos = (projected[0], (viewport[3] - projected[1]))
+            # Convert from device pixels back to logical pixels
+            screen_pos = (projected[0] / dpr, (viewport[3] - projected[1]) / dpr)
         except:
             screen_pos = None
         finally:
@@ -1725,8 +1756,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             set_number: The set number (e.g., 1 for strands 1_1, 1_2, etc.)
             color: RGBA tuple (0-1 range)
         """
-        set_prefix = f"{set_number}_"
+        # Update the set color registry
+        self.set_colors[str(set_number)] = color
 
+        set_prefix = f"{set_number}_"
         for strand in self.strands:
             if strand.name.startswith(set_prefix):
                 strand.color = color

@@ -236,6 +236,9 @@ class AttachModeMixin:
             name=strand_name
         )
 
+        # Inherit color from parent strand (same set = same color)
+        self.attach_new_strand.color = parent_strand.color
+
         # Apply default profile settings from canvas
         self.attach_new_strand.width = self.default_strand_width
         self.attach_new_strand.height_ratio = self.default_height_ratio

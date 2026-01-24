@@ -25,7 +25,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("OpenStrandStudio 3D")
-        self.setMinimumSize(1200, 800)
+        self.setMinimumSize(900, 600)
 
         # Initialize components
         self.canvas = None
@@ -38,6 +38,7 @@ class MainWindow(QMainWindow):
         self._setup_statusbar()
         self._connect_signals()
         self._apply_dark_theme()
+        self._apply_button_styles()
         self._load_user_settings()
 
     def _setup_ui(self):
@@ -62,8 +63,9 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.canvas)
         splitter.addWidget(self.layer_panel)
 
-        # Set initial sizes (canvas gets more space)
-        splitter.setSizes([900, 300])
+        # Set stretch factors so layout adapts to any window size
+        splitter.setStretchFactor(0, 3)  # Canvas gets 3/4 of space
+        splitter.setStretchFactor(1, 1)  # Layer panel gets 1/4 of space
 
         main_layout.addWidget(splitter)
 
@@ -84,6 +86,7 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar("Main Toolbar")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
+        self.main_toolbar = toolbar  # Store reference for styling
 
         # === File operations ===
         self.action_new = QAction("New", self)
@@ -158,7 +161,6 @@ class MainWindow(QMainWindow):
 
         # Angle Adjust mode
         self.action_angle_adjust = QAction("Adjust", self)
-        self.action_angle_adjust.setToolTip("Adjust angle and length of selected strand")
         self.action_angle_adjust.setCheckable(True)
         self.action_angle_adjust.triggered.connect(self._activate_angle_adjust)
         toolbar.addAction(self.action_angle_adjust)
@@ -184,7 +186,7 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # Reset camera
-        self.action_reset_camera = QAction("Reset Camera", self)
+        self.action_reset_camera = QAction("Reset", self)
         self.action_reset_camera.triggered.connect(self._reset_camera)
         toolbar.addAction(self.action_reset_camera)
 
@@ -208,7 +210,6 @@ class MainWindow(QMainWindow):
 
         # Strand Profile Editor
         self.action_strand_profile = QAction("Profile", self)
-        self.action_strand_profile.setToolTip("Edit strand cross-section shape and dimensions")
         self.action_strand_profile.triggered.connect(self._open_strand_profile_editor)
         toolbar.addAction(self.action_strand_profile)
 
@@ -228,9 +229,9 @@ class MainWindow(QMainWindow):
 
         # === Move mode options toolbar (new line) ===
         self.addToolBarBreak()
-        move_toolbar = QToolBar("Move Options")
-        move_toolbar.setMovable(False)
-        self.addToolBar(move_toolbar)
+        self.move_toolbar = QToolBar("Move Options")
+        self.move_toolbar.setMovable(False)
+        self.addToolBar(self.move_toolbar)
 
         self.move_mode_group = QActionGroup(self)
         self.move_mode_group.setExclusive(True)
@@ -240,57 +241,47 @@ class MainWindow(QMainWindow):
         self.action_move_xz.setChecked(True)
         self.action_move_xz.triggered.connect(lambda: self._set_move_axis_mode("normal"))
         self.move_mode_group.addAction(self.action_move_xz)
-        move_toolbar.addAction(self.action_move_xz)
+        self.move_toolbar.addAction(self.action_move_xz)
 
         self.action_move_y = QAction("Move Y (Shift)", self)
         self.action_move_y.setCheckable(True)
         self.action_move_y.triggered.connect(lambda: self._set_move_axis_mode("vertical"))
         self.move_mode_group.addAction(self.action_move_y)
-        move_toolbar.addAction(self.action_move_y)
+        self.move_toolbar.addAction(self.action_move_y)
 
         self.action_move_depth = QAction("Move Depth (Ctrl)", self)
         self.action_move_depth.setCheckable(True)
         self.action_move_depth.triggered.connect(lambda: self._set_move_axis_mode("depth"))
         self.move_mode_group.addAction(self.action_move_depth)
-        move_toolbar.addAction(self.action_move_depth)
+        self.move_toolbar.addAction(self.action_move_depth)
 
         self.action_move_along = QAction("Move Along (Other Point)", self)
         self.action_move_along.setCheckable(True)
         self.action_move_along.triggered.connect(lambda: self._set_move_axis_mode("along"))
         self.move_mode_group.addAction(self.action_move_along)
-        move_toolbar.addAction(self.action_move_along)
+        self.move_toolbar.addAction(self.action_move_along)
 
-        move_toolbar.addSeparator()
+        self.move_toolbar.addSeparator()
 
         # Link Control Points toggle - when ON, connected CPs sync for smooth spline
         self.action_link_cps = QAction("Link CPs", self)
         self.action_link_cps.setCheckable(True)
         self.action_link_cps.setChecked(False)  # Default OFF (independent mode)
-        self.action_link_cps.setToolTip(
-            "Link Control Points at connections\n"
-            "OFF: Control points are independent (default)\n"
-            "ON: Moving one CP syncs the connected CP for smooth spline"
-        )
         self.action_link_cps.triggered.connect(self._toggle_link_control_points)
-        move_toolbar.addAction(self.action_link_cps)
+        self.move_toolbar.addAction(self.action_link_cps)
 
         # Edit All toggle - when ON, show CPs for all strands and allow moving any
         self.action_edit_all = QAction("Edit All", self)
         self.action_edit_all.setCheckable(True)
         self.action_edit_all.setChecked(False)  # Default OFF
-        self.action_edit_all.setToolTip(
-            "Edit All Strands\n"
-            "OFF: Only show/edit selected strand's control points (default)\n"
-            "ON: Show control points for ALL strands and move any"
-        )
         self.action_edit_all.triggered.connect(self._toggle_edit_all)
-        move_toolbar.addAction(self.action_edit_all)
+        self.move_toolbar.addAction(self.action_edit_all)
 
         # === Attach mode options toolbar (new line) ===
         self.addToolBarBreak()
-        attach_toolbar = QToolBar("Attach Options")
-        attach_toolbar.setMovable(False)
-        self.addToolBar(attach_toolbar)
+        self.attach_toolbar = QToolBar("Attach Options")
+        self.attach_toolbar.setMovable(False)
+        self.addToolBar(self.attach_toolbar)
 
         self.attach_mode_group = QActionGroup(self)
         self.attach_mode_group.setExclusive(True)
@@ -300,25 +291,25 @@ class MainWindow(QMainWindow):
         self.action_attach_xz.setChecked(True)
         self.action_attach_xz.triggered.connect(lambda: self._set_attach_axis_mode("normal"))
         self.attach_mode_group.addAction(self.action_attach_xz)
-        attach_toolbar.addAction(self.action_attach_xz)
+        self.attach_toolbar.addAction(self.action_attach_xz)
 
         self.action_attach_y = QAction("Attach Y (Shift)", self)
         self.action_attach_y.setCheckable(True)
         self.action_attach_y.triggered.connect(lambda: self._set_attach_axis_mode("vertical"))
         self.attach_mode_group.addAction(self.action_attach_y)
-        attach_toolbar.addAction(self.action_attach_y)
+        self.attach_toolbar.addAction(self.action_attach_y)
 
         self.action_attach_depth = QAction("Attach Depth (Ctrl)", self)
         self.action_attach_depth.setCheckable(True)
         self.action_attach_depth.triggered.connect(lambda: self._set_attach_axis_mode("depth"))
         self.attach_mode_group.addAction(self.action_attach_depth)
-        attach_toolbar.addAction(self.action_attach_depth)
+        self.attach_toolbar.addAction(self.action_attach_depth)
 
         self.action_attach_along = QAction("Attach Along (Other Point)", self)
         self.action_attach_along.setCheckable(True)
         self.action_attach_along.triggered.connect(lambda: self._set_attach_axis_mode("along"))
         self.attach_mode_group.addAction(self.action_attach_along)
-        attach_toolbar.addAction(self.action_attach_along)
+        self.attach_toolbar.addAction(self.action_attach_along)
 
         # === Stretch mode options toolbar (new line) ===
         self.addToolBarBreak()
@@ -352,7 +343,6 @@ class MainWindow(QMainWindow):
 
         # Go button to execute the stretch
         self.action_stretch_go = QAction("Go!", self)
-        self.action_stretch_go.setToolTip("Execute stretch in the set direction until collision")
         self.action_stretch_go.triggered.connect(self._execute_stretch)
         self.stretch_toolbar.addAction(self.action_stretch_go)
 
@@ -431,21 +421,20 @@ class MainWindow(QMainWindow):
                 background-color: #2D2D30;
                 border: none;
                 border-bottom: 1px solid #3E3E42;
-                spacing: 3px;
-                padding: 3px;
+                spacing: 2px;
+                padding: 2px;
             }
             QToolBar::separator {
                 background-color: #3E3E42;
                 width: 1px;
-                margin: 4px 6px;
+                margin: 3px 4px;
             }
             QToolButton {
                 background-color: #353538;
                 border: 1px solid #3E3E42;
                 border-radius: 4px;
-                padding: 5px 10px;
+                padding: 3px 5px;
                 color: #E8E8E8;
-                min-width: 60px;
             }
             QToolButton:hover {
                 background-color: #454548;
@@ -504,6 +493,69 @@ class MainWindow(QMainWindow):
                 color: #E8E8E8;
             }
         """)
+
+    def _apply_button_styles(self):
+        """Apply uniform Cool Teal elevated card style to all toolbar buttons"""
+
+        bg = '#5B9EA6'          # Cool Teal
+        text_color = '#FFFFFF'  # White text for contrast
+        highlight = '#6BAEB6'   # Lighter teal (top/left edge)
+        hover = '#65A8B0'       # Slightly brighter on hover
+        shadow = '#3A7178'      # Darker teal (bottom/right edge)
+        checked = '#4A8E96'     # Darker when checked/active
+        pressed = '#3D7880'     # Darkest when pressed
+        font = "Söhne, Inter, Segoe UI, sans-serif"
+
+        style = f"""
+            QToolButton {{
+                background-color: {bg};
+                border-top: 1px solid #6EB0B8;
+                border-left: 1px solid #6EB0B8;
+                border-right: 2px solid {shadow};
+                border-bottom: 2px solid {shadow};
+                border-radius: 6px;
+                padding: 4px 6px;
+                color: {text_color};
+                font-family: {font};
+                font-size: 11px;
+                font-weight: 500;
+            }}
+            QToolButton:hover {{
+                background-color: {hover};
+                border-top: 1px solid #75B5BD;
+                border-left: 1px solid #75B5BD;
+                border-right: 2px solid {shadow};
+                border-bottom: 2px solid {shadow};
+            }}
+            QToolButton:pressed {{
+                background-color: {pressed};
+                border-top: 2px solid {shadow};
+                border-left: 2px solid {shadow};
+                border-right: 1px solid #6EB0B8;
+                border-bottom: 1px solid #6EB0B8;
+                padding: 5px 5px 3px 7px;
+            }}
+            QToolButton:checked {{
+                background-color: {checked};
+                border-top: 2px solid {shadow};
+                border-left: 2px solid {shadow};
+                border-right: 1px solid #6EB0B8;
+                border-bottom: 1px solid #6EB0B8;
+                color: {text_color};
+                padding: 5px 5px 3px 7px;
+            }}
+            QToolButton:checked:hover {{
+                background-color: {hover};
+            }}
+        """
+
+        # Apply to all toolbars
+        for toolbar in [self.main_toolbar, self.move_toolbar, self.attach_toolbar,
+                        self.stretch_toolbar, self.rotate_toolbar]:
+            for action in toolbar.actions():
+                widget = toolbar.widgetForAction(action)
+                if widget:
+                    widget.setStyleSheet(style)
 
     def _load_user_settings(self):
         """Load user settings and apply them to the UI"""
@@ -690,7 +742,10 @@ class MainWindow(QMainWindow):
 
     def _on_strand_created(self, strand_name: str):
         """Handle new strand creation"""
-        self.layer_panel.add_strand(strand_name)
+        # Find the strand to get its actual color
+        strand = next((s for s in self.canvas.strands if s.name == strand_name), None)
+        color = strand.color if strand else (0.667, 0.667, 1.0, 1.0)
+        self.layer_panel.add_strand(strand_name, color=color)
         self.statusbar.showMessage(f"Created strand: {strand_name}", 3000)
 
         # Automatically switch to attach mode after creating a new strand
@@ -711,7 +766,9 @@ class MainWindow(QMainWindow):
 
         new_set_number, new_names = result
         for name in new_names:
-            self.layer_panel.add_strand(name)
+            strand = next((s for s in self.canvas.strands if s.name == name), None)
+            color = strand.color if strand else (0.667, 0.667, 1.0, 1.0)
+            self.layer_panel.add_strand(name, color=color)
 
         self.statusbar.showMessage(
             f"Duplicated set {set_number} -> {new_set_number}",
@@ -755,7 +812,7 @@ class MainWindow(QMainWindow):
         """Handle undo completion - sync layer panel"""
         self.layer_panel.clear()
         for strand in self.canvas.strands:
-            self.layer_panel.add_strand(strand.name)
+            self.layer_panel.add_strand(strand.name, color=strand.color)
 
         # Update selection in layer panel
         if self.canvas.selected_strand:
@@ -765,7 +822,7 @@ class MainWindow(QMainWindow):
         """Handle redo completion - sync layer panel"""
         self.layer_panel.clear()
         for strand in self.canvas.strands:
-            self.layer_panel.add_strand(strand.name)
+            self.layer_panel.add_strand(strand.name, color=strand.color)
 
         # Update selection in layer panel
         if self.canvas.selected_strand:
@@ -867,7 +924,7 @@ class MainWindow(QMainWindow):
 
             # Update layer panel with loaded strands
             for strand in self.canvas.strands:
-                self.layer_panel.add_strand(strand.name)
+                self.layer_panel.add_strand(strand.name, color=strand.color)
 
             self.current_project_file = file_path
             self.setWindowTitle(f"OpenStrandStudio 3D - {file_path.split('/')[-1].split(chr(92))[-1]}")

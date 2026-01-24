@@ -32,6 +32,8 @@ class RotateModeMixin:
     ROTATE_HANDLE_COLOR = (1.0, 0.5, 0.0)  # Orange for draggable handle
     ROTATE_DISK_COLOR = (0.3, 0.8, 0.4)  # Green for rotation disk
     ROTATE_DISK_ACTIVE_COLOR = (0.5, 1.0, 0.6)  # Bright green when rotating
+    ROTATE_DISK_HOVER_COLOR = (0.4, 0.9, 0.5)  # Lighter green on hover
+    ROTATE_HANDLE_HOVER_COLOR = (1.0, 0.75, 0.2)  # Bright orange-yellow on hover
     ROTATE_CENTER_RADIUS = 0.15
     ROTATE_HANDLE_RADIUS = 0.12
     ROTATE_DISK_RADIUS = 0.6  # Radius of the rotation disk
@@ -54,10 +56,20 @@ class RotateModeMixin:
         self.rotate_drag_start_x = None  # Starting X position of drag
         self.rotate_drag_start_screen_pos = None  # (x, y) screen position where drag started
         self.rotate_current_screen_x = None  # Current mouse X for UI drawing
+        self.rotate_hover_handle = False  # True when mouse is over axis handle
+        self.rotate_hover_disk = False  # True when mouse is over rotation disk
 
     def _enter_rotate_mode(self):
         """Called when entering rotate mode."""
         self._init_rotate_mode()
+
+        # If a strand is already selected, immediately activate rotation for its set
+        if self.selected_strand:
+            parts = self.selected_strand.name.split('_')
+            if len(parts) >= 1:
+                set_number = parts[0]
+                self.select_set_for_rotation(set_number)
+
         self.update()
 
     def _exit_rotate_mode(self):
@@ -315,10 +327,13 @@ class RotateModeMixin:
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
-        # Highlight when editing
+        # Highlight when editing or hovering
         if self.is_editing_rotate_axis:
             glColor4f(1.0, 1.0, 0.0, 0.9)  # Bright yellow when dragging
             radius = 0.15
+        elif self.rotate_hover_handle:
+            glColor4f(*self.ROTATE_HANDLE_HOVER_COLOR, 0.9)  # Bright orange-yellow on hover
+            radius = self.ROTATE_HANDLE_RADIUS * 1.2  # Slightly larger on hover
         else:
             glColor4f(*self.ROTATE_HANDLE_COLOR, 0.8)
             radius = self.ROTATE_HANDLE_RADIUS
@@ -352,10 +367,13 @@ class RotateModeMixin:
         perp2 = np.cross(axis, perp1)
         perp2 = perp2 / np.linalg.norm(perp2)
 
-        # Choose color based on whether we're rotating
+        # Choose color based on state: rotating > hovering > default
         if self.is_rotating:
             color = self.ROTATE_DISK_ACTIVE_COLOR
             line_width = 4.0
+        elif self.rotate_hover_disk:
+            color = self.ROTATE_DISK_HOVER_COLOR
+            line_width = 3.5
         else:
             color = self.ROTATE_DISK_COLOR
             line_width = 3.0
@@ -642,15 +660,14 @@ class RotateModeMixin:
                     (edge_screen[1] - center_screen[1]) ** 2
                 )
 
-                # Click is on disk if within radius + some tolerance
-                # But not too close to center (that's for the handle)
-                inner_threshold = screen_radius * 0.3
+                # Click is on disk if anywhere within radius + some tolerance
+                # Handle detection takes priority (checked first in mouse_press)
                 outer_threshold = screen_radius * 1.3
 
-                return inner_threshold < screen_dist < outer_threshold
+                return screen_dist < outer_threshold
 
-        # Fallback: fixed pixel threshold
-        return 30 < screen_dist < 80
+        # Fallback: fixed pixel threshold (entire area within 80px)
+        return screen_dist < 80
 
     def _rotate_mode_mouse_press(self, event):
         """Handle mouse press in rotate mode."""
@@ -673,12 +690,18 @@ class RotateModeMixin:
         if self._is_clicking_rotate_handle(screen_x, screen_y):
             self.is_editing_rotate_axis = True
             self.is_rotating = False  # Make sure we're not in rotation mode
+            self.rotate_hover_handle = False
+            self.rotate_hover_disk = False
+            self.setCursor(Qt.ClosedHandCursor)
             print("Rotate: Editing axis direction")
             self.update()
             return True
 
         # Check if clicking on the rotation disk to start rotation (SECOND priority)
         if self._is_clicking_rotation_disk(screen_x, screen_y):
+            self.rotate_hover_handle = False
+            self.rotate_hover_disk = False
+            self.setCursor(Qt.ClosedHandCursor)
             self._start_disk_rotation(screen_x, screen_y)
             return True
 
@@ -785,6 +808,33 @@ class RotateModeMixin:
             # Perform rotation based on horizontal (left/right) mouse movement
             self._update_disk_rotation(screen_x)
             return True
+
+        # Hover detection when not actively dragging
+        if self.rotate_mode_active:
+            prev_hover_handle = self.rotate_hover_handle
+            prev_hover_disk = self.rotate_hover_disk
+
+            # Check handle first (higher priority)
+            self.rotate_hover_handle = self._is_clicking_rotate_handle(screen_x, screen_y)
+
+            # Check disk only if not hovering handle
+            if not self.rotate_hover_handle:
+                self.rotate_hover_disk = self._is_clicking_rotation_disk(screen_x, screen_y)
+            else:
+                self.rotate_hover_disk = False
+
+            # Update cursor based on hover state
+            if self.rotate_hover_handle or self.rotate_hover_disk:
+                self.setCursor(Qt.OpenHandCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
+
+            # Redraw if hover state changed
+            if (prev_hover_handle != self.rotate_hover_handle or
+                    prev_hover_disk != self.rotate_hover_disk):
+                self.update()
+
+            return self.rotate_hover_handle or self.rotate_hover_disk
 
         return False
 
@@ -964,6 +1014,7 @@ class RotateModeMixin:
         """Handle mouse release in rotate mode."""
         if self.is_editing_rotate_axis:
             self.is_editing_rotate_axis = False
+            self.setCursor(Qt.ArrowCursor)
             print("Rotate: Axis editing stopped")
             self.update()
             return True
@@ -986,6 +1037,7 @@ class RotateModeMixin:
                         'cp2': strand.control_point2.copy()
                     }
             self.rotate_angle = 0.0
+            self.setCursor(Qt.ArrowCursor)
             angle_degrees = math.degrees(self.rotate_total_angle)
             print(f"Rotate: Rotation completed (total: {angle_degrees:.1f}°)")
             self.update()
@@ -1099,12 +1151,17 @@ class RotateModeMixin:
         """Convert screen coordinates to a point on a vertical plane through reference_point."""
         self.makeCurrent()
 
+        # Account for device pixel ratio
+        dpr = int(self.devicePixelRatioF())
+        screen_x = screen_x * dpr
+        screen_y = screen_y * dpr
+
         glMatrixMode(GL_PROJECTION)
         glPushMatrix()
         glLoadIdentity()
 
-        width = self.width()
-        height = self.height() if self.height() > 0 else 1
+        width = self.width() * dpr
+        height = (self.height() * dpr) if self.height() > 0 else 1
         aspect = width / height
         gluPerspective(45.0, aspect, 0.1, 1000.0)
 

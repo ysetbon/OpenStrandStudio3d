@@ -1195,13 +1195,18 @@ class MoveModeMixin:
         """
         self.makeCurrent()
 
+        # Account for device pixel ratio
+        dpr = int(self.devicePixelRatioF())
+        screen_x = screen_x * dpr
+        screen_y = screen_y * dpr
+
         # Setup matrices
         glMatrixMode(GL_PROJECTION)
         glPushMatrix()
         glLoadIdentity()
 
-        width = self.width()
-        height = self.height() if self.height() > 0 else 1
+        width = self.width() * dpr
+        height = (self.height() * dpr) if self.height() > 0 else 1
         aspect = width / height
         gluPerspective(45.0, aspect, 0.1, 1000.0)
 
