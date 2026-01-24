@@ -90,6 +90,7 @@ TOOLBAR_BUTTON_STYLE = """
         border-radius: 6px;
         padding: 4px 6px;
         color: #FFFFFF;
+        font-family: Söhne, Inter, Segoe UI, sans-serif;
         font-size: 11px;
         font-weight: 500;
     }
