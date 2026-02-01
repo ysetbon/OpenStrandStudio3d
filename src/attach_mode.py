@@ -166,12 +166,81 @@ class AttachModeMixin:
             glEnable(GL_LIGHTING)
 
 
+    def _get_projected_sphere_radius(self, center_3d):
+        """
+        Calculate the projected screen radius of a sphere at the given 3D position.
+
+        Uses the camera distance and perspective projection to determine how large
+        the sphere appears on screen.
+
+        Args:
+            center_3d: The 3D position of the sphere center
+
+        Returns:
+            The projected radius in screen pixels, or a fallback value if projection fails
+        """
+        # Project the sphere center to screen
+        center_screen = self._project_point_to_screen(center_3d)
+        if not center_screen:
+            return 30  # Fallback to fixed threshold
+
+        # Calculate camera position
+        azimuth_rad = math.radians(self.camera_azimuth)
+        elevation_rad = math.radians(self.camera_elevation)
+        camera_x = self.camera_target[0] + self.camera_distance * math.cos(elevation_rad) * math.sin(azimuth_rad)
+        camera_y = self.camera_target[1] + self.camera_distance * math.sin(elevation_rad)
+        camera_z = self.camera_target[2] + self.camera_distance * math.cos(elevation_rad) * math.cos(azimuth_rad)
+        camera_pos = np.array([camera_x, camera_y, camera_z])
+
+        # Get vector from camera to sphere center
+        center_arr = np.array(center_3d)
+        to_center = center_arr - camera_pos
+        dist_to_center = np.linalg.norm(to_center)
+
+        if dist_to_center < 0.001:
+            return 30  # Fallback if too close
+
+        # Get a perpendicular vector to offset the sphere surface point
+        # This gives us a point on the sphere's silhouette as seen from the camera
+        to_center_normalized = to_center / dist_to_center
+
+        # Find a perpendicular vector (cross with up vector, or use alternative if parallel)
+        up = np.array([0.0, 1.0, 0.0])
+        perp = np.cross(to_center_normalized, up)
+        perp_len = np.linalg.norm(perp)
+
+        if perp_len < 0.001:
+            # Camera is looking straight up/down, use different perpendicular
+            perp = np.cross(to_center_normalized, np.array([1.0, 0.0, 0.0]))
+            perp_len = np.linalg.norm(perp)
+
+        if perp_len > 0.001:
+            perp = perp / perp_len
+        else:
+            return 30  # Fallback
+
+        # Calculate a point on the sphere's edge (silhouette)
+        edge_point = center_arr + perp * self.attach_sphere_radius
+
+        # Project the edge point to screen
+        edge_screen = self._project_point_to_screen(edge_point)
+        if not edge_screen:
+            return 30  # Fallback
+
+        # Calculate screen distance between center and edge
+        dx = edge_screen[0] - center_screen[0]
+        dy = edge_screen[1] - center_screen[1]
+        projected_radius = math.sqrt(dx * dx + dy * dy)
+
+        # Add a small buffer for easier interaction (20% larger than visual)
+        # and ensure minimum clickable size of 8 pixels
+        return max(projected_radius * 1.2, 8)
+
     def _update_attach_point_hover(self, screen_x, screen_y):
         """Update which attachment point is being hovered (only free endpoints)"""
-        hover_threshold = 30  # pixels
-
         closest_point = None
         closest_dist = float('inf')
+        closest_threshold = float('inf')
 
         for strand in self.strands:
             if not strand.visible:
@@ -180,15 +249,19 @@ class AttachModeMixin:
             # Check start point if it's free
             if self._is_endpoint_free(strand, 0):
                 dist = self._get_point_screen_distance(strand.start, screen_x, screen_y)
-                if dist < hover_threshold and dist < closest_dist:
+                threshold = self._get_projected_sphere_radius(strand.start)
+                if dist < threshold and dist < closest_dist:
                     closest_dist = dist
+                    closest_threshold = threshold
                     closest_point = (strand, 0)
 
             # Check end point if it's free
             if self._is_endpoint_free(strand, 1):
                 dist = self._get_point_screen_distance(strand.end, screen_x, screen_y)
-                if dist < hover_threshold and dist < closest_dist:
+                threshold = self._get_projected_sphere_radius(strand.end)
+                if dist < threshold and dist < closest_dist:
                     closest_dist = dist
+                    closest_threshold = threshold
                     closest_point = (strand, 1)
 
         self.hovered_attach_point = closest_point

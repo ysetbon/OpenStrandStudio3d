@@ -4,7 +4,7 @@
   "default_cross_section_shape": "ellipse",
   "default_corner_radius": 0.0,
   "show_grid": true,
-  "show_axes": false,
+  "show_axes": true,
   "link_control_points": true,
   "move_edit_all": true
 }

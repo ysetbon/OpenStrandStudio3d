@@ -627,7 +627,12 @@ class RotateModeMixin:
         glMatrixMode(GL_MODELVIEW)
 
     def _is_clicking_rotation_disk(self, screen_x, screen_y):
-        """Check if clicking on or near the rotation disk."""
+        """
+        Check if clicking on or near the rotation disk.
+
+        Projects the two disk axes (perp1, perp2) to screen space and checks
+        if mouse is inside the resulting ellipse.
+        """
         if self.rotate_center is None:
             return False
 
@@ -636,38 +641,75 @@ class RotateModeMixin:
         if center_screen is None:
             return False
 
-        # Calculate screen distance from center
-        dx = screen_x - center_screen[0]
-        dy = screen_y - center_screen[1]
-        screen_dist = math.sqrt(dx * dx + dy * dy)
+        if self.rotate_axis_direction is None:
+            # Fallback
+            dx = screen_x - center_screen[0]
+            dy = screen_y - center_screen[1]
+            return math.sqrt(dx * dx + dy * dy) < 80
 
-        # Estimate disk radius on screen (approximate)
-        # Project a point on the disk edge to get screen radius
-        if self.rotate_axis_direction is not None:
-            axis = self.rotate_axis_direction
-            if abs(axis[1]) < 0.9:
-                perp = np.cross(axis, np.array([0, 1, 0]))
-            else:
-                perp = np.cross(axis, np.array([1, 0, 0]))
-            perp = perp / np.linalg.norm(perp)
+        axis = self.rotate_axis_direction
 
-            edge_point = self.rotate_center + perp * self.ROTATE_DISK_RADIUS
-            edge_screen = self._project_point_to_screen(edge_point)
+        # Find two perpendicular vectors to the axis (same as rendering)
+        if abs(axis[1]) < 0.9:
+            perp1 = np.cross(axis, np.array([0, 1, 0]))
+        else:
+            perp1 = np.cross(axis, np.array([1, 0, 0]))
+        perp1 = perp1 / np.linalg.norm(perp1)
 
-            if edge_screen:
-                screen_radius = math.sqrt(
-                    (edge_screen[0] - center_screen[0]) ** 2 +
-                    (edge_screen[1] - center_screen[1]) ** 2
-                )
+        perp2 = np.cross(axis, perp1)
+        perp2 = perp2 / np.linalg.norm(perp2)
 
-                # Click is on disk if anywhere within radius + some tolerance
-                # Handle detection takes priority (checked first in mouse_press)
-                outer_threshold = screen_radius * 1.3
+        # Project the two axis endpoints to screen (same axes used in drawing)
+        axis1_3d = self.rotate_center + perp1 * self.ROTATE_DISK_RADIUS
+        axis2_3d = self.rotate_center + perp2 * self.ROTATE_DISK_RADIUS
 
-                return screen_dist < outer_threshold
+        axis1_screen = self._project_point_to_screen(axis1_3d)
+        axis2_screen = self._project_point_to_screen(axis2_3d)
 
-        # Fallback: fixed pixel threshold (entire area within 80px)
-        return screen_dist < 80
+        if not axis1_screen or not axis2_screen:
+            return False
+
+        # Get screen-space axis vectors from center
+        ax1 = np.array([axis1_screen[0] - center_screen[0],
+                        axis1_screen[1] - center_screen[1]])
+        ax2 = np.array([axis2_screen[0] - center_screen[0],
+                        axis2_screen[1] - center_screen[1]])
+
+        # Mouse offset from center
+        mouse_offset = np.array([screen_x - center_screen[0],
+                                 screen_y - center_screen[1]])
+
+        # Solve for parametric coordinates (u, v) where:
+        # mouse_offset = u * ax1 + v * ax2
+        # If u² + v² <= 1, mouse is inside the disk
+
+        # Build matrix [ax1 | ax2] and solve
+        det = ax1[0] * ax2[1] - ax1[1] * ax2[0]
+
+        if abs(det) < 0.001:
+            # Axes are nearly parallel (disk viewed edge-on)
+            # Fall back to distance check along the visible axis
+            ax1_len = np.linalg.norm(ax1)
+            ax2_len = np.linalg.norm(ax2)
+            if ax1_len > ax2_len and ax1_len > 1:
+                # Project mouse onto ax1
+                proj = np.dot(mouse_offset, ax1) / (ax1_len * ax1_len)
+                perp_dist = np.linalg.norm(mouse_offset - proj * ax1)
+                return abs(proj) <= 1.3 and perp_dist < 15
+            elif ax2_len > 1:
+                proj = np.dot(mouse_offset, ax2) / (ax2_len * ax2_len)
+                perp_dist = np.linalg.norm(mouse_offset - proj * ax2)
+                return abs(proj) <= 1.3 and perp_dist < 15
+            return False
+
+        # Inverse of [ax1 | ax2] matrix
+        inv_det = 1.0 / det
+        u = inv_det * (ax2[1] * mouse_offset[0] - ax2[0] * mouse_offset[1])
+        v = inv_det * (-ax1[1] * mouse_offset[0] + ax1[0] * mouse_offset[1])
+
+        # Check if inside ellipse (with 30% tolerance for easier clicking)
+        dist_squared = u * u + v * v
+        return dist_squared <= 1.3 * 1.3  # 1.3 = 30% larger than visual
 
     def _rotate_mode_mouse_press(self, event):
         """Handle mouse press in rotate mode."""

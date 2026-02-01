@@ -36,7 +36,7 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         super().__init__(parent)
 
         # Interaction mode
-        self.current_mode = "select"
+        self.current_mode = "view"
 
         # Camera parameters
         self.camera_distance = 10.0

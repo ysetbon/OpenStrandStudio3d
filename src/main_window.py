@@ -121,10 +121,16 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # === Mode selection ===
+        # View mode (camera navigation only, no editing)
+        self.action_view = QAction("View", self)
+        self.action_view.setCheckable(True)
+        self.action_view.setChecked(True)  # Default mode
+        self.action_view.triggered.connect(lambda: self._set_mode("view"))
+        toolbar.addAction(self.action_view)
+
         # Select mode
         self.action_select = QAction("Select", self)
         self.action_select.setCheckable(True)
-        self.action_select.setChecked(True)
         self.action_select.triggered.connect(lambda: self._set_mode("select"))
         toolbar.addAction(self.action_select)
 
@@ -214,6 +220,7 @@ class MainWindow(QMainWindow):
 
         # Group actions for exclusive selection
         self.mode_actions = [
+            self.action_view,
             self.action_select,
             self.action_add_strand,
             self.action_attach,
@@ -586,6 +593,8 @@ class MainWindow(QMainWindow):
 
         if mode == "select":
             self.action_select.setChecked(True)
+        elif mode == "view":
+            self.action_view.setChecked(True)
         elif mode == "add_strand":
             self.action_add_strand.setChecked(True)
         elif mode == "attach":
