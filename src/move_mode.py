@@ -8,6 +8,7 @@ import numpy as np
 from PyQt5.QtCore import Qt
 from OpenGL.GL import *
 from OpenGL.GLU import *
+from strand import Strand  # For deferred VBO cleanup during drag
 
 
 class MoveModeMixin:
@@ -881,6 +882,8 @@ class MoveModeMixin:
             self._reset_directional_movement("_move_along")
             if hasattr(self, "_move_along_direction"):
                 delattr(self, "_move_along_direction")
+            # Defer VBO cleanup during drag for performance
+            Strand.begin_drag_operation()
             print(f"Moving {self.hovered_control_point.upper()} of {strand.name}")
 
     def _update_move(self, screen_x, screen_y, axis_mode="normal", shift_held=False, ctrl_held=False):
@@ -1347,6 +1350,8 @@ class MoveModeMixin:
         """End move operation"""
         if self.moving_strand:
             print(f"Finished moving {self.moving_strand.name}")
+        # DON'T end drag operation here - stay in individual rendering mode
+        # for fast subsequent drags. Chain VBO rebuilds only when leaving move mode.
         self.moving_strand = None
         self.moving_control_point = None
         self.move_start_pos = None

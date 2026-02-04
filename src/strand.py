@@ -19,6 +19,9 @@ class Strand:
     - control_point2: Second Bezier control point (influences curve near end)
     """
 
+    # Class-level flag to defer VBO cleanup during drag operations (performance optimization)
+    _defer_vbo_cleanup = False
+
     def __init__(self, start, end, name="", color=None, width=0.15):
         """
         Initialize a 3D strand.
@@ -92,7 +95,9 @@ class Strand:
         self._frame_cache.clear()
         if len(self._chain_cache) > 0:
             self._chain_cache.clear()
-        self._clear_vbo_cache()
+        # Skip VBO deletion during drag - deferred to drag end for performance
+        if not Strand._defer_vbo_cleanup:
+            self._clear_vbo_cache()
 
     def _clear_vbo_cache(self):
         """Delete cached VBOs to avoid stale geometry and GPU leaks."""
@@ -119,7 +124,27 @@ class Strand:
         """Limit VBO cache growth by clearing when it gets too large."""
         if len(self._vbo_cache) <= max_entries:
             return
+        # During drag, allow larger cache to avoid GPU sync
+        if Strand._defer_vbo_cleanup:
+            if len(self._vbo_cache) <= max_entries * 5:  # Allow 30 entries during drag
+                return
         self._clear_vbo_cache()
+
+    @classmethod
+    def begin_drag_operation(cls):
+        """Call at start of drag to defer VBO cleanup for performance."""
+        cls._defer_vbo_cleanup = True
+
+    @classmethod
+    def end_drag_operation(cls, strands=None):
+        """Call at end of drag to flush deferred VBO cleanup.
+
+        Args:
+            strands: Optional list of strands to clear VBOs for. If None, does nothing
+                     (VBOs will be rebuilt on next render automatically).
+        """
+        cls._defer_vbo_cleanup = False
+        # VBOs are stale but will be rebuilt on next render - no need to explicitly clear
 
     def get_bezier_point(self, t):
         """
@@ -247,7 +272,12 @@ class Strand:
 
         # Check if this strand is a root (not attached to anything)
         # If so, draw the entire chain as one continuous spline
-        if self._is_chain_root():
+        # OPTIMIZATION: During drag, draw strands individually to avoid
+        # recalculating the entire chain when only one strand changes
+        if Strand._defer_vbo_cleanup:
+            # During drag: draw this strand individually
+            self._draw_single_strand(curve_segments, tube_segments, cap_segments)
+        elif self._is_chain_root():
             self._draw_chain_as_spline(
                 curve_segments=curve_segments,
                 tube_segments=tube_segments,
@@ -371,6 +401,31 @@ class Strand:
             # Continue chain with each attached strand
             for attached in end_attachments:
                 attached._collect_chains(current_chain, all_chains)
+
+    def _draw_single_strand(self, curve_segments=None, tube_segments=None, cap_segments=32):
+        """Draw just this single strand (used during drag for performance).
+
+        During drag, we use immediate mode (no VBOs) to avoid the overhead of
+        creating new VBOs every frame as geometry changes.
+        """
+        if curve_segments is None:
+            curve_segments = self.curve_segments
+        if tube_segments is None:
+            tube_segments = self.tube_segments
+
+        # Get curve points and frames for just this strand
+        curve_points, frames = self._get_curve_points_and_frames(curve_segments)
+        if len(curve_points) < 2:
+            return
+
+        # During drag: use immediate mode (no VBO creation overhead)
+        self._draw_tube_from_points(curve_points, frames, tube_segments=tube_segments)
+
+        # Draw end caps
+        tangent_start = self.get_bezier_tangent(0.0)
+        self._draw_shape_cap(self.start, -tangent_start, segments=cap_segments)
+        tangent_end = self.get_bezier_tangent(1.0)
+        self._draw_shape_cap(self.end, tangent_end, segments=cap_segments)
 
     def _draw_chain_as_spline(self, curve_segments=None, tube_segments=None, cap_segments=32):
         """Draw the entire strand chain as one continuous Bezier spline"""

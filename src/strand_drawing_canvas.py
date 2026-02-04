@@ -127,10 +127,11 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self._last_rotate_frame_time = 0.0
 
         # Drag LOD (lower-res while moving a strand/control point)
+        # OPTIMIZATION: Very aggressive LOD reduction for smooth 43+ strand chains
         self.drag_lod_enabled = True
-        self.drag_curve_segments = 28
-        self.drag_tube_segments = 20
-        self.drag_cap_segments = 12
+        self.drag_curve_segments = 12  # Reduced from 28 for faster drag
+        self.drag_tube_segments = 8    # Reduced from 20 for faster drag
+        self.drag_cap_segments = 6     # Reduced from 12 for faster drag
         self._drag_lod_targets = set()
 
         # Grid and axes settings
@@ -500,13 +501,17 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
 
     def _draw_strands(self):
         """Draw all strands in the scene"""
+        from strand import Strand
         camera_pos = self._get_camera_position()
         drag_roots = self._get_drag_lod_roots() if self.drag_lod_enabled else set()
+
+        # OPTIMIZATION: Force drag LOD for ALL strands during drag operation
+        force_all_drag_lod = Strand._defer_vbo_cleanup
 
         for strand in self.strands:
             is_selected = (strand == self.selected_strand)
             is_hovered = (strand == self.hovered_strand)
-            if self._should_use_drag_lod(strand, drag_roots):
+            if force_all_drag_lod or self._should_use_drag_lod(strand, drag_roots):
                 lod = self._get_drag_lod_for_strand(strand, camera_pos, force_drag=True)
             else:
                 lod = self._get_lod_for_strand(strand, camera_pos)
@@ -591,16 +596,33 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         }
 
     def _get_chain_root_for_strand(self, strand):
-        """Return the chain root for the given strand."""
+        """Return the chain root for the given strand (cached during drag)."""
+        # Use cache during drag operations for performance
+        if not hasattr(self, '_chain_root_cache'):
+            self._chain_root_cache = {}
+
+        # Check cache first
+        strand_id = id(strand)
+        if strand_id in self._chain_root_cache:
+            return self._chain_root_cache[strand_id]
+
         from attached_strand import AttachedStrand
 
         current = strand
         if isinstance(current, AttachedStrand):
             if current.attachment_side == 0:
+                self._chain_root_cache[strand_id] = current
                 return current
             while isinstance(current, AttachedStrand) and current.attachment_side == 1:
                 current = current.parent_strand
+
+        self._chain_root_cache[strand_id] = current
         return current
+
+    def _clear_chain_root_cache(self):
+        """Clear chain root cache (call when attachment structure changes)."""
+        if hasattr(self, '_chain_root_cache'):
+            self._chain_root_cache.clear()
 
     def _get_drag_lod(self):
         """Return drag LOD settings."""
@@ -613,6 +635,7 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
     def _reset_drag_lod_targets(self):
         """Reset the set of strands participating in drag LOD."""
         self._drag_lod_targets.clear()
+        self._clear_chain_root_cache()  # Clear cached chain roots too
 
     def _add_drag_lod_target(self, strand):
         """Add a strand to the drag LOD set."""
@@ -1382,6 +1405,7 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             strand.make_straight()
 
         self.strands.append(strand)
+        self._clear_chain_root_cache()  # Invalidate chain root cache
         self.selected_strand = strand
 
         print(f"Created strand '{strand_name}': {start} -> {end} (length: {length:.2f})")
@@ -1599,6 +1623,12 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
 
     def set_mode(self, mode: str):
         """Set the current interaction mode"""
+        from strand import Strand
+
+        # If leaving move mode, end deferred VBO cleanup (rebuild chain VBOs)
+        if self.current_mode == "move" and mode != "move":
+            Strand.end_drag_operation()
+
         print(f"Mode changed to: {mode}")
         self.current_mode = mode
         self.mode_changed.emit(mode)
