@@ -42,6 +42,76 @@ class MoveModeMixin:
     TWIST_RING_SEGMENTS = 32  # Number of segments for the ring
     TWIST_RING_THICKNESS = 3.0  # Line width for the ring
 
+    # Control point screen position cache (for fast hover detection)
+    # Key: (strand_id, cp_name) -> Value: (screen_x, screen_y)
+    CP_HOVER_BOX_SIZE = 20  # Fixed screen-space hit box size in pixels
+
+    def _init_cp_screen_cache(self):
+        """Initialize the control point screen position cache."""
+        if not hasattr(self, '_cp_screen_cache'):
+            self._cp_screen_cache = {}
+            self._cp_cache_camera_state = None  # Track camera state for invalidation
+
+    def _invalidate_cp_screen_cache(self):
+        """Invalidate the entire control point screen cache."""
+        if hasattr(self, '_cp_screen_cache'):
+            self._cp_screen_cache.clear()
+            self._cp_cache_camera_state = None
+
+    def _get_camera_state(self):
+        """Get current camera state for cache invalidation check."""
+        return (
+            getattr(self, 'camera_azimuth', 0),
+            getattr(self, 'camera_elevation', 0),
+            getattr(self, 'camera_distance', 0),
+            tuple(getattr(self, 'camera_target', [0, 0, 0]))
+        )
+
+    def _update_cp_screen_cache_if_needed(self):
+        """Rebuild cache if camera has moved."""
+        self._init_cp_screen_cache()
+        current_camera_state = self._get_camera_state()
+
+        if self._cp_cache_camera_state != current_camera_state:
+            # Camera moved - rebuild entire cache
+            self._rebuild_cp_screen_cache()
+            self._cp_cache_camera_state = current_camera_state
+
+    def _rebuild_cp_screen_cache(self):
+        """Project all control points to screen once and cache them."""
+        self._cp_screen_cache.clear()
+
+        for strand in self.strands:
+            if not strand.visible:
+                continue
+
+            strand_id = id(strand)
+            cp_names = ['start', 'end', 'cp1', 'cp2']
+            cp_positions = [strand.start, strand.end, strand.control_point1, strand.control_point2]
+
+            for cp_name, cp_pos in zip(cp_names, cp_positions):
+                screen_pos = self._project_point_to_screen(cp_pos)
+                if screen_pos:
+                    self._cp_screen_cache[(strand_id, cp_name)] = screen_pos
+
+    def _update_single_cp_cache(self, strand, cp_name):
+        """Update cache for a single control point (after dragging it)."""
+        self._init_cp_screen_cache()
+        strand_id = id(strand)
+
+        if cp_name == 'start':
+            cp_pos = strand.start
+        elif cp_name == 'end':
+            cp_pos = strand.end
+        elif cp_name == 'cp1':
+            cp_pos = strand.control_point1
+        else:
+            cp_pos = strand.control_point2
+
+        screen_pos = self._project_point_to_screen(cp_pos)
+        if screen_pos:
+            self._cp_screen_cache[(strand_id, cp_name)] = screen_pos
+
     def _draw_control_points(self):
         """
         Draw control points for strands.
@@ -585,7 +655,7 @@ class MoveModeMixin:
             self._draw_twist_ring(strand.control_point2, cp_box_size, strand, 'cp2')
 
     def _update_control_point_hover(self, screen_x, screen_y):
-        """Update which control point is being hovered"""
+        """Update which control point is being hovered (using cached screen positions)"""
         edit_all = getattr(self, 'move_edit_all', False)
 
         # Determine which strands to check
@@ -607,57 +677,37 @@ class MoveModeMixin:
             self.setCursor(Qt.ArrowCursor)
             return
 
-        # Screen pixel threshold for hover detection
-        min_hover_threshold = 12  # pixels
+        # OPTIMIZATION: Update cache if camera moved (one-time cost)
+        self._update_cp_screen_cache_if_needed()
+
+        # Fixed screen-space hover threshold (no GL calls needed!)
+        hover_threshold = self.CP_HOVER_BOX_SIZE
 
         closest_cp = None
         closest_strand = None
         closest_dist = float('inf')
 
         for strand in strands_to_check:
-            # Build control points dict for this strand
+            strand_id = id(strand)
+
             # In straight mode, only allow hovering over start/end (not cp1/cp2)
             if self.straight_segment_mode:
-                control_points = {
-                    'start': strand.start,
-                    'end': strand.end
-                }
+                cp_names = ['start', 'end']
             else:
-                control_points = {
-                    'start': strand.start,
-                    'end': strand.end,
-                    'cp1': strand.control_point1,
-                    'cp2': strand.control_point2
-                }
+                cp_names = ['start', 'end', 'cp1', 'cp2']
 
-            for cp_name, cp_pos in control_points.items():
-                screen_center = self._project_point_to_screen(cp_pos)
+            for cp_name in cp_names:
+                # Use cached screen position (no GL calls!)
+                cache_key = (strand_id, cp_name)
+                screen_center = self._cp_screen_cache.get(cache_key)
                 if not screen_center:
                     continue
 
-                box_size = self.control_point_box_size
-                if cp_name in ('cp1', 'cp2'):
-                    box_size *= 0.8
-
-                half = box_size / 2.0
-                max_radius = 0.0
-                for sx in (-1.0, 1.0):
-                    for sy in (-1.0, 1.0):
-                        for sz in (-1.0, 1.0):
-                            offset = np.array([sx * half, sy * half, sz * half])
-                            screen_offset = self._project_point_to_screen(cp_pos + offset)
-                            if not screen_offset:
-                                continue
-                            dx = screen_offset[0] - screen_center[0]
-                            dy = screen_offset[1] - screen_center[1]
-                            dist = math.sqrt(dx * dx + dy * dy)
-                            if dist > max_radius:
-                                max_radius = dist
-
-                hover_threshold = max(min_hover_threshold, max_radius)
+                # Simple 2D distance check (no projection needed)
                 dx = screen_center[0] - screen_x
                 dy = screen_center[1] - screen_y
                 screen_dist = math.sqrt(dx * dx + dy * dy)
+
                 if screen_dist < hover_threshold and screen_dist < closest_dist:
                     closest_dist = screen_dist
                     closest_cp = cp_name
@@ -1352,6 +1402,10 @@ class MoveModeMixin:
             print(f"Finished moving {self.moving_strand.name}")
         # DON'T end drag operation here - stay in individual rendering mode
         # for fast subsequent drags. Chain VBO rebuilds only when leaving move mode.
+
+        # Invalidate CP screen cache since points may have moved
+        self._invalidate_cp_screen_cache()
+
         self.moving_strand = None
         self.moving_control_point = None
         self.move_start_pos = None
