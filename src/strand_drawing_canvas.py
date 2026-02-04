@@ -693,7 +693,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         """Draw a simple sphere at the given position"""
         glPushMatrix()
         glTranslatef(*position)
-        glColor3f(*color)
+        if len(color) >= 4:
+            glColor4f(color[0], color[1], color[2], color[3])
+        else:
+            glColor3f(color[0], color[1], color[2])
 
         quadric = gluNewQuadric()
         gluSphere(quadric, radius, 16, 16)
