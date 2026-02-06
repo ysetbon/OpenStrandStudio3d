@@ -421,11 +421,28 @@ class Strand:
         # During drag: use immediate mode (no VBO creation overhead)
         self._draw_tube_from_points(curve_points, frames, tube_segments=tube_segments)
 
-        # Draw end caps
-        tangent_start = self.get_bezier_tangent(0.0)
-        self._draw_shape_cap(self.start, -tangent_start, segments=cap_segments)
-        tangent_end = self.get_bezier_tangent(1.0)
-        self._draw_shape_cap(self.end, tangent_end, segments=cap_segments)
+        # Draw end caps ONLY at true ends (not at connection points)
+        # This prevents visual gaps when rendering strands individually
+
+        # Check if START is connected (this is an AttachedStrand with a parent)
+        start_connected = hasattr(self, 'parent_strand') and self.parent_strand is not None
+
+        # Check if END is connected (has attached strands at end, i.e., attachment_side == 1)
+        end_connected = False
+        if hasattr(self, 'attached_strands'):
+            for attached in self.attached_strands:
+                if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
+                    end_connected = True
+                    break
+
+        # Only draw caps at unconnected ends
+        if not start_connected:
+            tangent_start = self.get_bezier_tangent(0.0)
+            self._draw_shape_cap(self.start, -tangent_start, segments=cap_segments)
+
+        if not end_connected:
+            tangent_end = self.get_bezier_tangent(1.0)
+            self._draw_shape_cap(self.end, tangent_end, segments=cap_segments)
 
     def _draw_chain_as_spline(self, curve_segments=None, tube_segments=None, cap_segments=32):
         """Draw the entire strand chain as one continuous Bezier spline"""
@@ -1707,14 +1724,16 @@ class Strand:
         self.start = new_start
         self._mark_geometry_dirty()
 
-        # Update attached strands at start (attachment_side == 0)
-        for attached in self.attached_strands:
-            if hasattr(attached, 'attachment_side') and attached.attachment_side == 0:
-                if hasattr(attached, 'update_start_from_parent'):
-                    attached.update_start_from_parent()
-                # Only sync CPs if link_cps is enabled
-                if link_cps and hasattr(attached, 'sync_cp1_with_parent_c1'):
-                    attached.sync_cp1_with_parent_c1()
+        # NOTE: Don't call update_start_from_parent() here - it moves the ENTIRE attached strand.
+        # Instead, let _propagate_to_attached_strands in move_mode.py handle the 2D-style
+        # propagation (only move the attached strand's start, not its end).
+
+        # Only sync CPs if link_cps is enabled
+        if link_cps:
+            for attached in self.attached_strands:
+                if hasattr(attached, 'attachment_side') and attached.attachment_side == 0:
+                    if hasattr(attached, 'sync_cp1_with_parent_c1'):
+                        attached.sync_cp1_with_parent_c1()
 
     def set_end(self, position, link_cps=False):
         """
@@ -1737,14 +1756,16 @@ class Strand:
         self.end = new_end
         self._mark_geometry_dirty()
 
-        # Update attached strands at end (attachment_side == 1)
-        for attached in self.attached_strands:
-            if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
-                if hasattr(attached, 'update_start_from_parent'):
-                    attached.update_start_from_parent()
-                # Only sync CPs if link_cps is enabled
-                if link_cps and hasattr(attached, 'sync_cp1_with_parent_c1'):
-                    attached.sync_cp1_with_parent_c1()
+        # NOTE: Don't call update_start_from_parent() here - it moves the ENTIRE attached strand.
+        # Instead, let _propagate_to_attached_strands in move_mode.py handle the 2D-style
+        # propagation (only move the attached strand's start, not its end).
+
+        # Only sync CPs if link_cps is enabled
+        if link_cps:
+            for attached in self.attached_strands:
+                if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
+                    if hasattr(attached, 'sync_cp1_with_parent_c1'):
+                        attached.sync_cp1_with_parent_c1()
 
     def move(self, delta):
         """Move the entire strand by delta"""

@@ -6,5 +6,5 @@
   "show_grid": true,
   "show_axes": true,
   "link_control_points": true,
-  "move_edit_all": false
+  "move_edit_all": true
 }
