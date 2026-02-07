@@ -1074,7 +1074,17 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             if self.current_mode == "select":
                 self._update_select_hover(event.x(), event.y())
             elif self.current_mode == "move" and self.selected_strand:
+                prev = (getattr(self, 'hovered_control_point', None),
+                        getattr(self, 'hovered_twist_ring', None),
+                        getattr(self, 'hovered_strand_for_move', None),
+                        getattr(self, 'hovered_twist_ring_strand', None))
                 self._update_control_point_hover(event.x(), event.y())
+                cur = (self.hovered_control_point,
+                       self.hovered_twist_ring,
+                       getattr(self, 'hovered_strand_for_move', None),
+                       getattr(self, 'hovered_twist_ring_strand', None))
+                if cur == prev:
+                    update_needed = False
             elif self.current_mode == "attach":
                 self._update_attach_point_hover(event.x(), event.y())
             elif self.current_mode == "rotate" and getattr(self, 'rotate_mode_active', False):
@@ -1609,6 +1619,63 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             glMatrixMode(GL_MODELVIEW)
 
         return screen_pos
+
+    def _batch_project_points_to_screen(self, points_3d):
+        """Project multiple 3D points to screen coordinates in a single GL pass.
+        Sets up matrices once, projects all points, then tears down. Much faster
+        than calling _project_point_to_screen individually for each point."""
+        if not points_3d:
+            return []
+
+        self.makeCurrent()
+        dpr = int(self.devicePixelRatioF())
+
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+
+        width = self.width() * dpr
+        height = (self.height() * dpr) if self.height() > 0 else 1
+        aspect = width / height
+        gluPerspective(45.0, aspect, 0.1, 1000.0)
+
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+
+        azimuth_rad = math.radians(self.camera_azimuth)
+        elevation_rad = math.radians(self.camera_elevation)
+
+        camera_x = self.camera_target[0] + self.camera_distance * math.cos(elevation_rad) * math.sin(azimuth_rad)
+        camera_y = self.camera_target[1] + self.camera_distance * math.sin(elevation_rad)
+        camera_z = self.camera_target[2] + self.camera_distance * math.cos(elevation_rad) * math.cos(azimuth_rad)
+
+        gluLookAt(
+            camera_x, camera_y, camera_z,
+            self.camera_target[0], self.camera_target[1], self.camera_target[2],
+            0.0, 1.0, 0.0
+        )
+
+        viewport = glGetIntegerv(GL_VIEWPORT)
+        modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
+        projection = glGetDoublev(GL_PROJECTION_MATRIX)
+
+        results = []
+        for pt in points_3d:
+            try:
+                projected = gluProject(pt[0], pt[1], pt[2],
+                                       modelview, projection, viewport)
+                results.append((projected[0] / dpr, (viewport[3] - projected[1]) / dpr))
+            except:
+                results.append(None)
+
+        glMatrixMode(GL_MODELVIEW)
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+
+        return results
 
     def _get_point_screen_distance(self, point_3d, screen_x, screen_y):
         """Get screen-space distance from a 3D point to screen coordinates"""

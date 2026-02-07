@@ -51,20 +51,29 @@ class MoveModeMixin:
         if not hasattr(self, '_cp_screen_cache'):
             self._cp_screen_cache = {}
             self._cp_cache_camera_state = None  # Track camera state for invalidation
+            self._cp_grid = {}  # Spatial hash: (cell_x, cell_y) -> [(strand_ref, cp_name, sx, sy)]
+            self._cp_grid_cell_size = self.CP_HOVER_BOX_SIZE
+            self._ring_screen_cache = {}  # (strand_id, cp_name) -> screen_ring_radius
 
     def _invalidate_cp_screen_cache(self):
         """Invalidate the entire control point screen cache."""
         if hasattr(self, '_cp_screen_cache'):
             self._cp_screen_cache.clear()
             self._cp_cache_camera_state = None
+        if hasattr(self, '_cp_grid'):
+            self._cp_grid.clear()
+        if hasattr(self, '_ring_screen_cache'):
+            self._ring_screen_cache.clear()
 
     def _get_camera_state(self):
-        """Get current camera state for cache invalidation check."""
+        """Get current camera state for cache invalidation check.
+        Includes move_axis_mode because twist ring orientation depends on it."""
         return (
             getattr(self, 'camera_azimuth', 0),
             getattr(self, 'camera_elevation', 0),
             getattr(self, 'camera_distance', 0),
-            tuple(getattr(self, 'camera_target', [0, 0, 0]))
+            tuple(getattr(self, 'camera_target', [0, 0, 0])),
+            getattr(self, 'move_axis_mode', 'normal'),
         )
 
     def _update_cp_screen_cache_if_needed(self):
@@ -78,26 +87,89 @@ class MoveModeMixin:
             self._cp_cache_camera_state = current_camera_state
 
     def _rebuild_cp_screen_cache(self):
-        """Project all control points to screen once and cache them."""
+        """Batch-project all control points, build spatial grid, and cache ring radii."""
         self._cp_screen_cache.clear()
+        self._cp_grid.clear()
+        self._ring_screen_cache.clear()
+
+        cell_size = self._cp_grid_cell_size
+        move_mode = getattr(self, 'move_axis_mode', 'normal')
+
+        # Collect all points to project in one batch
+        all_points = []
+        # Each entry: ('cp', strand_ref, strand_id, cp_name) or ('ring_edge', strand_ref, strand_id, cp_name)
+        point_info = []
 
         for strand in self.strands:
             if not strand.visible:
                 continue
-
             strand_id = id(strand)
-            cp_names = ['start', 'end', 'cp1', 'cp2']
-            cp_positions = [strand.start, strand.end, strand.control_point1, strand.control_point2]
+            is_circle = getattr(strand, 'cross_section_shape', 'ellipse') == 'circle'
 
-            for cp_name, cp_pos in zip(cp_names, cp_positions):
-                screen_pos = self._project_point_to_screen(cp_pos)
-                if screen_pos:
-                    self._cp_screen_cache[(strand_id, cp_name)] = screen_pos
+            for cp_name, cp_pos in [('start', strand.start), ('end', strand.end),
+                                     ('cp1', strand.control_point1), ('cp2', strand.control_point2)]:
+                all_points.append(cp_pos)
+                point_info.append(('cp', strand, strand_id, cp_name))
+
+                # Also collect ring edge point for non-circle strands
+                if not is_circle:
+                    box_size = self.control_point_box_size
+                    if cp_name in ('cp1', 'cp2'):
+                        box_size *= 0.8
+                    ring_radius_3d = box_size * self.TWIST_RING_RADIUS_FACTOR
+                    perp = self._get_ring_perp(move_mode, strand, cp_name)
+                    ring_edge = cp_pos + perp * ring_radius_3d
+                    all_points.append(ring_edge)
+                    point_info.append(('ring_edge', strand, strand_id, cp_name))
+
+        # Single GL pass for all projections
+        screen_results = self._batch_project_points_to_screen(all_points)
+
+        # Process results: build cache, grid, and ring cache
+        for i, info in enumerate(point_info):
+            screen_pos = screen_results[i]
+            if screen_pos is None:
+                continue
+
+            if info[0] == 'cp':
+                _, strand_ref, strand_id, cp_name = info
+                cache_key = (strand_id, cp_name)
+                self._cp_screen_cache[cache_key] = screen_pos
+                # Add to spatial grid
+                cx = int(screen_pos[0] / cell_size)
+                cy = int(screen_pos[1] / cell_size)
+                grid_key = (cx, cy)
+                if grid_key not in self._cp_grid:
+                    self._cp_grid[grid_key] = []
+                self._cp_grid[grid_key].append((strand_ref, cp_name, screen_pos[0], screen_pos[1]))
+
+            elif info[0] == 'ring_edge':
+                _, strand_ref, strand_id, cp_name = info
+                cache_key = (strand_id, cp_name)
+                cp_screen = self._cp_screen_cache.get(cache_key)
+                if cp_screen:
+                    screen_ring_radius = math.sqrt(
+                        (screen_pos[0] - cp_screen[0]) ** 2 +
+                        (screen_pos[1] - cp_screen[1]) ** 2
+                    )
+                    self._ring_screen_cache[cache_key] = screen_ring_radius
 
     def _update_single_cp_cache(self, strand, cp_name):
-        """Update cache for a single control point (after dragging it)."""
+        """Update cache, grid, and ring data for a single control point."""
         self._init_cp_screen_cache()
         strand_id = id(strand)
+        cache_key = (strand_id, cp_name)
+        cell_size = self._cp_grid_cell_size
+
+        # Remove old entry from grid
+        old_screen = self._cp_screen_cache.get(cache_key)
+        if old_screen:
+            old_cx = int(old_screen[0] / cell_size)
+            old_cy = int(old_screen[1] / cell_size)
+            old_cell = self._cp_grid.get((old_cx, old_cy), [])
+            self._cp_grid[(old_cx, old_cy)] = [
+                e for e in old_cell if not (e[0] is strand and e[1] == cp_name)
+            ]
 
         if cp_name == 'start':
             cp_pos = strand.start
@@ -108,9 +180,85 @@ class MoveModeMixin:
         else:
             cp_pos = strand.control_point2
 
-        screen_pos = self._project_point_to_screen(cp_pos)
+        # Batch project CP + ring edge in one GL pass
+        is_circle = getattr(strand, 'cross_section_shape', 'ellipse') == 'circle'
+        points = [cp_pos]
+        if not is_circle:
+            box_size = self.control_point_box_size
+            if cp_name in ('cp1', 'cp2'):
+                box_size *= 0.8
+            ring_radius_3d = box_size * self.TWIST_RING_RADIUS_FACTOR
+            move_mode = getattr(self, 'move_axis_mode', 'normal')
+            perp = self._get_ring_perp(move_mode, strand, cp_name)
+            points.append(cp_pos + perp * ring_radius_3d)
+
+        results = self._batch_project_points_to_screen(points)
+
+        screen_pos = results[0] if results else None
         if screen_pos:
-            self._cp_screen_cache[(strand_id, cp_name)] = screen_pos
+            self._cp_screen_cache[cache_key] = screen_pos
+            # Add to new grid cell
+            cx = int(screen_pos[0] / cell_size)
+            cy = int(screen_pos[1] / cell_size)
+            grid_key = (cx, cy)
+            if grid_key not in self._cp_grid:
+                self._cp_grid[grid_key] = []
+            self._cp_grid[grid_key].append((strand, cp_name, screen_pos[0], screen_pos[1]))
+            # Update ring cache
+            if not is_circle and len(results) > 1 and results[1]:
+                ring_screen = results[1]
+                screen_ring_radius = math.sqrt(
+                    (ring_screen[0] - screen_pos[0]) ** 2 +
+                    (ring_screen[1] - screen_pos[1]) ** 2
+                )
+                self._ring_screen_cache[cache_key] = screen_ring_radius
+        else:
+            self._cp_screen_cache.pop(cache_key, None)
+            self._ring_screen_cache.pop(cache_key, None)
+
+    def _get_ring_perp(self, move_mode, strand, cp_name):
+        """Get the perpendicular direction for a twist ring based on move axis mode."""
+        if move_mode == "normal":
+            return np.array([0.0, 1.0, 0.0])
+        elif move_mode == "vertical":
+            return np.array([1.0, 0.0, 0.0])
+        elif move_mode == "depth":
+            azimuth_rad = math.radians(self.camera_azimuth)
+            elevation_rad = math.radians(self.camera_elevation)
+            cam_forward = np.array([
+                -math.cos(elevation_rad) * math.sin(azimuth_rad),
+                -math.sin(elevation_rad),
+                -math.cos(elevation_rad) * math.cos(azimuth_rad)
+            ])
+            if abs(cam_forward[1]) < 0.9:
+                up_hint = np.array([0.0, 1.0, 0.0])
+            else:
+                up_hint = np.array([1.0, 0.0, 0.0])
+            perp = np.cross(cam_forward, up_hint)
+            perp_len = np.linalg.norm(perp)
+            return perp / perp_len if perp_len > 1e-6 else np.array([1.0, 0.0, 0.0])
+        elif move_mode == "along":
+            along_dir = None
+            if cp_name == 'start':
+                along_dir = strand.end - strand.start
+            elif cp_name == 'end':
+                along_dir = strand.start - strand.end
+            elif cp_name == 'cp1':
+                along_dir = strand.start - strand.control_point1
+            elif cp_name == 'cp2':
+                along_dir = strand.end - strand.control_point2
+            if along_dir is not None and np.linalg.norm(along_dir) > 1e-6:
+                along_dir = along_dir / np.linalg.norm(along_dir)
+                if abs(along_dir[1]) < 0.9:
+                    up_hint = np.array([0.0, 1.0, 0.0])
+                else:
+                    up_hint = np.array([1.0, 0.0, 0.0])
+                perp = np.cross(along_dir, up_hint)
+                perp_len = np.linalg.norm(perp)
+                return perp / perp_len if perp_len > 1e-6 else np.array([1.0, 0.0, 0.0])
+            return np.array([1.0, 0.0, 0.0])
+        else:
+            return np.array([1.0, 0.0, 0.0])
 
     def _draw_control_points(self):
         """
@@ -687,31 +835,28 @@ class MoveModeMixin:
         closest_strand = None
         closest_dist = float('inf')
 
-        for strand in strands_to_check:
-            strand_id = id(strand)
+        # O(1) grid lookup: check 3x3 neighborhood instead of all strands
+        cell_size = self._cp_grid_cell_size
+        cx = int(screen_x / cell_size)
+        cy = int(screen_y / cell_size)
+        # In normal mode, filter to selected strand only
+        filter_strand = None if edit_all else (strands_to_check[0] if strands_to_check else None)
+        skip_cps = frozenset(('cp1', 'cp2')) if self.straight_segment_mode else frozenset()
 
-            # In straight mode, only allow hovering over start/end (not cp1/cp2)
-            if self.straight_segment_mode:
-                cp_names = ['start', 'end']
-            else:
-                cp_names = ['start', 'end', 'cp1', 'cp2']
-
-            for cp_name in cp_names:
-                # Use cached screen position (no GL calls!)
-                cache_key = (strand_id, cp_name)
-                screen_center = self._cp_screen_cache.get(cache_key)
-                if not screen_center:
-                    continue
-
-                # Simple 2D distance check (no projection needed)
-                dx = screen_center[0] - screen_x
-                dy = screen_center[1] - screen_y
-                screen_dist = math.sqrt(dx * dx + dy * dy)
-
-                if screen_dist < hover_threshold and screen_dist < closest_dist:
-                    closest_dist = screen_dist
-                    closest_cp = cp_name
-                    closest_strand = strand
+        for gx in range(cx - 1, cx + 2):
+            for gy in range(cy - 1, cy + 2):
+                for strand_ref, cp_name, sx, sy in self._cp_grid.get((gx, gy), []):
+                    if filter_strand is not None and strand_ref is not filter_strand:
+                        continue
+                    if cp_name in skip_cps:
+                        continue
+                    dx = sx - screen_x
+                    dy = sy - screen_y
+                    screen_dist = math.sqrt(dx * dx + dy * dy)
+                    if screen_dist < hover_threshold and screen_dist < closest_dist:
+                        closest_dist = screen_dist
+                        closest_cp = cp_name
+                        closest_strand = strand_ref
 
         self.hovered_control_point = closest_cp
         self.hovered_strand_for_move = closest_strand  # Track which strand the hovered CP belongs to
@@ -765,118 +910,27 @@ class MoveModeMixin:
             self.setCursor(Qt.ArrowCursor)
 
     def _check_twist_ring_hover(self, screen_x, screen_y, strand, control_points):
-        """
-        Check if the mouse is hovering over a twist ring.
-
-        The ring is detected as a donut-shaped area around the control point,
-        between the box edge and the ring outer edge.
-
-        Args:
-            screen_x, screen_y: Mouse screen coordinates
-            strand: The selected strand
-            control_points: Dict of control point names to positions
-
-        Returns:
-            Name of the hovered ring ('start', 'end', 'cp1', 'cp2') or None
-        """
+        """Check if hovering over a twist ring using cached screen data (no GL calls)."""
         closest_ring = None
         closest_ring_dist = float('inf')
+        strand_id = id(strand)
 
-        for cp_name, cp_pos in control_points.items():
-            screen_center = self._project_point_to_screen(cp_pos)
-            if not screen_center:
+        for cp_name in control_points:
+            cache_key = (strand_id, cp_name)
+            screen_center = self._cp_screen_cache.get(cache_key)
+            screen_ring_radius = self._ring_screen_cache.get(cache_key)
+
+            if screen_center is None or screen_ring_radius is None:
                 continue
 
-            # Calculate box size and ring radius in screen space
-            box_size = self.control_point_box_size
-            if cp_name in ('cp1', 'cp2'):
-                box_size *= 0.8
-
-            ring_radius_3d = box_size * self.TWIST_RING_RADIUS_FACTOR
-
-            # Use orientation matching _draw_twist_ring based on move axis mode
-            move_mode = getattr(self, 'move_axis_mode', 'normal')
-
-            if move_mode == "normal":
-                # XZ mode: vertical ring (YZ plane)
-                perp = np.array([0.0, 1.0, 0.0])  # Y axis
-            elif move_mode == "vertical":
-                # Y mode: horizontal ring (XZ plane)
-                perp = np.array([1.0, 0.0, 0.0])  # X axis
-            elif move_mode == "depth":
-                # Depth mode: ring faces camera
-                azimuth_rad = math.radians(self.camera_azimuth)
-                elevation_rad = math.radians(self.camera_elevation)
-                cam_forward = np.array([
-                    -math.cos(elevation_rad) * math.sin(azimuth_rad),
-                    -math.sin(elevation_rad),
-                    -math.cos(elevation_rad) * math.cos(azimuth_rad)
-                ])
-                if abs(cam_forward[1]) < 0.9:
-                    up_hint = np.array([0.0, 1.0, 0.0])
-                else:
-                    up_hint = np.array([1.0, 0.0, 0.0])
-                perp = np.cross(cam_forward, up_hint)
-                perp_len = np.linalg.norm(perp)
-                if perp_len > 1e-6:
-                    perp = perp / perp_len
-                else:
-                    perp = np.array([1.0, 0.0, 0.0])
-            elif move_mode == "along":
-                # Along mode: each ring perpendicular to its own along vector
-                along_dir = None
-                if cp_name == 'start':
-                    along_dir = strand.end - strand.start
-                elif cp_name == 'end':
-                    along_dir = strand.start - strand.end
-                elif cp_name == 'cp1':
-                    along_dir = strand.start - strand.control_point1  # CP1 to Start
-                elif cp_name == 'cp2':
-                    along_dir = strand.end - strand.control_point2    # CP2 to End
-
-                if along_dir is not None and np.linalg.norm(along_dir) > 1e-6:
-                    along_dir = along_dir / np.linalg.norm(along_dir)
-                    if abs(along_dir[1]) < 0.9:
-                        up_hint = np.array([0.0, 1.0, 0.0])
-                    else:
-                        up_hint = np.array([1.0, 0.0, 0.0])
-                    perp = np.cross(along_dir, up_hint)
-                    perp_len = np.linalg.norm(perp)
-                    if perp_len > 1e-6:
-                        perp = perp / perp_len
-                    else:
-                        perp = np.array([1.0, 0.0, 0.0])
-                else:
-                    perp = np.array([1.0, 0.0, 0.0])
-            else:
-                # Default: horizontal
-                perp = np.array([1.0, 0.0, 0.0])
-
-            # Project ring edge point
-            ring_edge = cp_pos + perp * ring_radius_3d
-            ring_screen = self._project_point_to_screen(ring_edge)
-            if not ring_screen:
-                continue
-
-            # Calculate screen ring radius
-            screen_ring_radius = math.sqrt(
-                (ring_screen[0] - screen_center[0]) ** 2 +
-                (ring_screen[1] - screen_center[1]) ** 2
-            )
-
-            # Calculate screen distance from mouse to center
             dx = screen_x - screen_center[0]
             dy = screen_y - screen_center[1]
             screen_dist = math.sqrt(dx * dx + dy * dy)
 
-            # Ring is detected as donut between inner and outer radius
-            # Inner radius is about 60% of ring radius (to exclude box area)
-            # Outer radius is about 120% of ring radius (tolerance)
             inner_threshold = screen_ring_radius * 0.5
             outer_threshold = screen_ring_radius * 1.3
 
             if inner_threshold < screen_dist < outer_threshold:
-                # Calculate how close to the ring line itself
                 ring_dist = abs(screen_dist - screen_ring_radius)
                 if ring_dist < closest_ring_dist:
                     closest_ring_dist = ring_dist
