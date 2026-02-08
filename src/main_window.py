@@ -7,7 +7,7 @@ import json
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QToolBar, QAction, QStatusBar, QSplitter, QLabel,
-    QFileDialog, QMessageBox, QActionGroup
+    QFileDialog, QMessageBox, QActionGroup, QInputDialog
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
@@ -107,6 +107,11 @@ class MainWindow(QMainWindow):
         self.action_load_points.setShortcut("Ctrl+Shift+O")
         self.action_load_points.triggered.connect(self._load_points)
         toolbar.addAction(self.action_load_points)
+
+        self.action_export_points = QAction("Export Points", self)
+        self.action_export_points.setShortcut("Ctrl+Shift+E")
+        self.action_export_points.triggered.connect(self._export_points)
+        toolbar.addAction(self.action_export_points)
 
         toolbar.addSeparator()
 
@@ -237,6 +242,8 @@ class MainWindow(QMainWindow):
 
         # Track current project file
         self.current_project_file = None
+        self._last_load_strand_length = 0.5
+        self._original_segment_lengths = []  # per-strand original lengths from loaded points
 
         # === Move mode options toolbar (new line) ===
         self.addToolBarBreak()
@@ -502,6 +509,50 @@ class MainWindow(QMainWindow):
             QFileDialog {
                 background-color: #2D2D30;
                 color: #E8E8E8;
+            }
+            QInputDialog {
+                background-color: #2D2D30;
+                color: #E8E8E8;
+                min-width: 350px;
+            }
+            QInputDialog QLabel {
+                color: #E8E8E8;
+                font-size: 18px;
+            }
+            QInputDialog QPushButton {
+                background-color: #353538;
+                border: 1px solid #3E3E42;
+                border-radius: 4px;
+                padding: 8px 22px;
+                color: #E8E8E8;
+                font-size: 15px;
+                font-weight: 500;
+                min-width: 98px;
+            }
+            QInputDialog QPushButton:hover {
+                background-color: #454548;
+                border-color: #5A5A5D;
+            }
+            QInputDialog QPushButton:pressed {
+                background-color: #2A2A2D;
+            }
+            QInputDialog QDoubleSpinBox {
+                background-color: #353538;
+                border: 1px solid #3E3E42;
+                border-radius: 4px;
+                padding: 6px 11px;
+                color: #E8E8E8;
+                font-size: 17px;
+            }
+            QInputDialog QDoubleSpinBox::up-button,
+            QInputDialog QDoubleSpinBox::down-button {
+                background-color: #454548;
+                border: 1px solid #3E3E42;
+                width: 22px;
+            }
+            QInputDialog QDoubleSpinBox::up-button:hover,
+            QInputDialog QDoubleSpinBox::down-button:hover {
+                background-color: #5A5A5D;
             }
         """)
 
@@ -996,8 +1047,18 @@ class MainWindow(QMainWindow):
             from attached_strand import AttachedStrand
             import numpy as np
 
-            # Target strand length
-            STRAND_LENGTH = 0.5
+            # Ask user for strand length
+            strand_length, ok = QInputDialog.getDouble(
+                self, "Strand Length",
+                "Length of each strand:",
+                self._last_load_strand_length,
+                0.2, 5.0, 1
+            )
+            if not ok:
+                return
+            self._last_load_strand_length = strand_length
+            self._original_segment_lengths = []
+            STRAND_LENGTH = strand_length
 
             # Get next set number for naming
             set_number = self.canvas._get_next_set_number()
@@ -1025,6 +1086,8 @@ class MainWindow(QMainWindow):
 
                 if length < 1e-10:
                     continue  # Skip zero-length segments
+
+                self._original_segment_lengths.append(length)
 
                 # Normalize direction
                 direction_normalized = direction / length
@@ -1093,4 +1156,125 @@ class MainWindow(QMainWindow):
                 self,
                 "Load Points Error",
                 f"Failed to load points:\n{str(e)}"
+            )
+
+    def _export_points(self):
+        """Export strand positions as a JSON point list, reversing the unit conversion."""
+        import numpy as np
+
+        strands = self.canvas.strands
+        if not strands or not self._original_segment_lengths:
+            QMessageBox.warning(self, "Export Points",
+                                "No loaded points to export. Use Load Points first.")
+            return
+
+        # Ask for export scale factor via a custom dialog with explanation.
+        from PyQt5.QtWidgets import QDialog, QDialogButtonBox, QDoubleSpinBox
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Export Scale")
+        dlg.setStyleSheet("""
+            QDialog {
+                background-color: #2D2D30;
+                min-width: 350px;
+            }
+            QLabel {
+                color: #E8E8E8;
+                font-size: 18px;
+            }
+            QPushButton {
+                background-color: #353538;
+                border: 1px solid #3E3E42;
+                border-radius: 4px;
+                padding: 8px 22px;
+                color: #E8E8E8;
+                font-size: 15px;
+                font-weight: 500;
+                min-width: 98px;
+            }
+            QPushButton:hover {
+                background-color: #454548;
+                border-color: #5A5A5D;
+            }
+            QPushButton:pressed {
+                background-color: #2A2A2D;
+            }
+            QDoubleSpinBox {
+                background-color: #353538;
+                border: 1px solid #3E3E42;
+                border-radius: 4px;
+                padding: 6px 11px;
+                color: #E8E8E8;
+                font-size: 17px;
+            }
+            QDoubleSpinBox::up-button,
+            QDoubleSpinBox::down-button {
+                background-color: #454548;
+                border: 1px solid #3E3E42;
+                width: 22px;
+            }
+            QDoubleSpinBox::up-button:hover,
+            QDoubleSpinBox::down-button:hover {
+                background-color: #5A5A5D;
+            }
+        """)
+        layout = QVBoxLayout(dlg)
+
+        info = QLabel(
+            "Scale factor for exported point spacing:\n\n"
+            "  1.0  =  original units (identical to loaded file)\n"
+            "  2.0  =  2x larger spacing between points\n"
+            "  0.5  =  half the original spacing\n\n"
+            "This only affects the exported file.\n"
+            "Re-importing always uses the Load strand length."
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        spin = QDoubleSpinBox()
+        spin.setRange(0.1, 100.0)
+        spin.setDecimals(1)
+        spin.setValue(1.0)
+        spin.setSingleStep(0.1)
+        layout.addWidget(spin)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        scale = spin.value()
+
+        # Reconstruct points using strand directions and original segment
+        # lengths, multiplied by the scale factor.
+        running = strands[0].start.copy()
+        points = [running.tolist()]
+        for i, strand in enumerate(strands):
+            direction = strand.end - strand.start
+            seg_len = np.linalg.norm(direction)
+            if seg_len < 1e-10:
+                continue
+            direction_normalized = direction / seg_len
+            orig_len = self._original_segment_lengths[i]
+            running = running + direction_normalized * orig_len * scale
+            points.append(running.tolist())
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Points", "", "JSON Files (*.json);;All Files (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "w") as f:
+                json.dump(points, f, indent=2)
+            self.statusbar.showMessage(
+                f"Exported {len(points)} points to {file_path}", 3000)
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Export Points Error",
+                f"Failed to export points:\n{str(e)}"
             )
