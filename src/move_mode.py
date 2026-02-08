@@ -938,6 +938,74 @@ class MoveModeMixin:
 
         return closest_ring
 
+    def _get_move_affected_strands(self, strand, cp_name):
+        """Return the set of strands whose geometry changes during this drag.
+
+        Mirrors the propagation logic in _move_connected_strands and
+        _propagate_to_attached_strands so the display list knows which
+        strands to exclude (they'll be drawn live each frame).
+
+        Args:
+            strand: The strand being dragged
+            cp_name: Which control point is being moved ('start', 'end', 'cp1', 'cp2')
+
+        Returns:
+            set of Strand objects that will be modified during the drag
+        """
+        from attached_strand import AttachedStrand
+        affected = {strand}
+        edit_all = getattr(self, 'move_edit_all', False)
+        link_cps = getattr(self, 'link_control_points', False)
+
+        if cp_name == 'start':
+            if edit_all:
+                # Edit All: also moves parent's connected endpoint
+                if isinstance(strand, AttachedStrand):
+                    affected.add(strand.parent_strand)
+            else:
+                # Normal: propagates to parent + siblings at same attachment side
+                if isinstance(strand, AttachedStrand):
+                    parent = strand.parent_strand
+                    affected.add(parent)
+                    # Siblings attached at same side of parent
+                    for sibling in parent.attached_strands:
+                        if sibling != strand and hasattr(sibling, 'attachment_side'):
+                            if sibling.attachment_side == strand.attachment_side:
+                                affected.add(sibling)
+                else:
+                    # Regular strand: attached strands at start (side=0)
+                    for attached in strand.attached_strands:
+                        if hasattr(attached, 'attachment_side') and attached.attachment_side == 0:
+                            affected.add(attached)
+
+        elif cp_name == 'end':
+            if edit_all:
+                # Edit All: moves attached strands at end (side=1) start points
+                for attached in strand.attached_strands:
+                    if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
+                        affected.add(attached)
+            else:
+                # Normal: propagates to attached strands at end (side=1)
+                for attached in strand.attached_strands:
+                    if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
+                        affected.add(attached)
+
+        elif cp_name in ('cp1', 'cp2'):
+            # CP moves: if link_cps, may sync parent/child CPs
+            if link_cps:
+                if cp_name == 'cp1':
+                    if isinstance(strand, AttachedStrand):
+                        affected.add(strand.parent_strand)
+                    for attached in strand.attached_strands:
+                        if hasattr(attached, 'attachment_side') and attached.attachment_side == 0:
+                            affected.add(attached)
+                elif cp_name == 'cp2':
+                    for attached in strand.attached_strands:
+                        if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
+                            affected.add(attached)
+
+        return affected
+
     def _start_move(self, screen_x, screen_y):
         """Start moving strand or control point - only works when clicking on a control point box"""
         edit_all = getattr(self, 'move_edit_all', False)
@@ -988,6 +1056,9 @@ class MoveModeMixin:
                 delattr(self, "_move_along_direction")
             # Defer VBO cleanup during drag for performance
             Strand.begin_drag_operation()
+            # Compile display list for non-affected strands (rendered once, replayed each frame)
+            affected = self._get_move_affected_strands(strand, self.hovered_control_point)
+            self._compile_drag_display_list(affected)
             print(f"Moving {self.hovered_control_point.upper()} of {strand.name}")
 
     def _update_move(self, screen_x, screen_y, axis_mode="normal", shift_held=False, ctrl_held=False):
@@ -1171,6 +1242,14 @@ class MoveModeMixin:
         else:
             # Move whole strand
             strand.move(delta)
+
+        # Safety net: if any drag LOD target is not in the display list's affected
+        # set, invalidate the display list to avoid rendering stale geometry.
+        if self._drag_display_list_id != 0:
+            for target in self._drag_lod_targets:
+                if target not in self._drag_affected_strands:
+                    self._delete_drag_display_list()
+                    break
 
     def _move_connected_strands(self, strand, endpoint, delta):
         """
@@ -1454,8 +1533,11 @@ class MoveModeMixin:
         """End move operation"""
         if self.moving_strand:
             print(f"Finished moving {self.moving_strand.name}")
-        # DON'T end drag operation here - stay in individual rendering mode
-        # for fast subsequent drags. Chain VBO rebuilds only when leaving move mode.
+        # Delete the display list - stale after geometry changed.
+        # DON'T call Strand.end_drag_operation() here — stay in individual
+        # rendering mode for fast subsequent drags.  Chain VBO rebuilds only
+        # happen when leaving move mode (set_mode).
+        self._delete_drag_display_list()
 
         # Invalidate CP screen cache since points may have moved
         self._invalidate_cp_screen_cache()

@@ -134,6 +134,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self.drag_cap_segments = 6     # Reduced from 12 for faster drag
         self._drag_lod_targets = set()
 
+        # Display list cache for drag optimization
+        self._drag_display_list_id = 0      # OpenGL display list ID (0 = none)
+        self._drag_affected_strands = set() # Strands drawn live (not in display list)
+
         # Grid and axes settings
         self.show_grid = True
         self.show_axes = True
@@ -508,14 +512,26 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         # OPTIMIZATION: Force drag LOD for ALL strands during drag operation
         force_all_drag_lod = Strand._defer_vbo_cleanup
 
-        for strand in self.strands:
-            is_selected = (strand == self.selected_strand)
-            is_hovered = (strand == self.hovered_strand)
-            if force_all_drag_lod or self._should_use_drag_lod(strand, drag_roots):
+        if force_all_drag_lod and self._drag_display_list_id != 0:
+            # FAST PATH: replay static strands from display list + draw only affected strands
+            glCallList(self._drag_display_list_id)
+            for strand in self._drag_affected_strands:
+                if not strand.visible:
+                    continue
+                is_selected = (strand == self.selected_strand)
+                is_hovered = (strand == self.hovered_strand)
                 lod = self._get_drag_lod_for_strand(strand, camera_pos, force_drag=True)
-            else:
-                lod = self._get_lod_for_strand(strand, camera_pos)
-            strand.draw(is_selected, is_hovered, lod=lod)
+                strand.draw(is_selected, is_hovered, lod=lod)
+        else:
+            # NORMAL PATH: draw all strands individually
+            for strand in self.strands:
+                is_selected = (strand == self.selected_strand)
+                is_hovered = (strand == self.hovered_strand)
+                if force_all_drag_lod or self._should_use_drag_lod(strand, drag_roots):
+                    lod = self._get_drag_lod_for_strand(strand, camera_pos, force_drag=True)
+                else:
+                    lod = self._get_lod_for_strand(strand, camera_pos)
+                strand.draw(is_selected, is_hovered, lod=lod)
 
         # Draw selection highlight for selected strand (semi-transparent overlay)
         if self.selected_strand and self.selected_strand.visible:
@@ -689,6 +705,62 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         if not self.drag_lod_enabled or not force_drag:
             return base_lod
         return self._merge_lod(base_lod, self._get_drag_lod())
+
+    def _compile_drag_display_list(self, affected_strands):
+        """Compile an OpenGL display list capturing all non-affected strands.
+
+        During drag, this list is replayed with a single glCallList() call,
+        so only the 1-5 affected strands need per-frame rendering.
+        Uses drag LOD so non-affected strands look consistent with affected ones.
+
+        Args:
+            affected_strands: set of Strand objects whose geometry changes during drag
+        """
+        self._delete_drag_display_list()
+
+        list_id = glGenLists(1)
+        if list_id == 0:
+            print("Warning: glGenLists failed, falling back to normal rendering")
+            return
+
+        camera_pos = self._get_camera_position()
+
+        glNewList(list_id, GL_COMPILE)
+        for strand in self.strands:
+            if strand in affected_strands:
+                continue
+            if not strand.visible:
+                continue
+            # Set strand color
+            color = strand.color
+            if len(color) >= 4:
+                glColor4f(color[0], color[1], color[2], color[3])
+            else:
+                glColor4f(color[0], color[1], color[2], 1.0)
+            # Use same drag LOD as affected strands for visual consistency
+            lod = self._get_drag_lod_for_strand(strand, camera_pos, force_drag=True)
+            curve_segments = strand.curve_segments
+            tube_segments = strand.tube_segments
+            cap_segments = 32
+            if lod:
+                curve_segments = lod.get("curve_segments", curve_segments)
+                tube_segments = lod.get("tube_segments", tube_segments)
+                cap_segments = lod.get("cap_segments", cap_segments)
+            strand._draw_single_strand(curve_segments, tube_segments, cap_segments)
+        glEndList()
+
+        self._drag_display_list_id = list_id
+        self._drag_affected_strands = set(affected_strands)
+
+    def _delete_drag_display_list(self):
+        """Delete the cached drag display list and reset state."""
+        if self._drag_display_list_id != 0:
+            try:
+                glDeleteLists(self._drag_display_list_id, 1)
+            except Exception:
+                pass
+            self._drag_display_list_id = 0
+        self._drag_affected_strands = set()
 
     def _draw_strand_preview(self):
         """Draw preview while creating a new strand"""
@@ -1695,6 +1767,7 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         # If leaving move mode, end deferred VBO cleanup (rebuild chain VBOs)
         if self.current_mode == "move" and mode != "move":
             Strand.end_drag_operation()
+            self._delete_drag_display_list()
 
         print(f"Mode changed to: {mode}")
         self.current_mode = mode
