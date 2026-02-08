@@ -270,22 +270,14 @@ class Strand:
             tube_segments = lod.get("tube_segments", tube_segments)
             cap_segments = lod.get("cap_segments", cap_segments)
 
-        # Check if this strand is a root (not attached to anything)
-        # If so, draw the entire chain as one continuous spline
-        # OPTIMIZATION: During drag, draw strands individually to avoid
-        # recalculating the entire chain when only one strand changes
-        if Strand._defer_vbo_cleanup:
-            # During drag: draw this strand individually
-            self._draw_single_strand(curve_segments, tube_segments, cap_segments)
-        elif self._is_chain_root():
+        # Chain roots draw the entire chain as one continuous spline.
+        # Non-roots are drawn as part of their parent's chain.
+        if self._is_chain_root():
             self._draw_chain_as_spline(
                 curve_segments=curve_segments,
                 tube_segments=tube_segments,
                 cap_segments=cap_segments
             )
-        else:
-            # This strand will be drawn as part of its parent's chain
-            pass
 
     def draw_selection_highlight(self, lod=None):
         """
@@ -320,52 +312,25 @@ class Strand:
         if len(frames) < 2:
             return
 
-        highlight_width = self.width * width_scale
-
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glDepthMask(GL_FALSE)
-
         glColor4f(*color)
 
-        # Get cross-section profile points based on shape
-        cs_points, height_ratio = self._get_cross_section_points(tube_segments)
-        ring_count = len(cs_points)
-        height = highlight_width * height_ratio
+        # Temporarily scale width to build highlight mesh
+        orig_width = self.width
+        self.width = orig_width * width_scale
+        vertices, normals = self._build_tube_mesh(curve_points, frames, tube_segments)
+        self.width = orig_width
 
-        glBegin(GL_QUAD_STRIP)
-
-        for i in range(len(curve_points) - 1):
-            right1, up1 = frames[i]
-            right2, up2 = frames[i + 1]
-            center1 = curve_points[i]
-            center2 = curve_points[i + 1]
-
-            for j in range(ring_count + 1):
-                idx = j % ring_count
-
-                # Get cross-section factors
-                x_factor, y_factor = cs_points[idx]
-
-                offset1 = highlight_width * x_factor * right1 + height * y_factor * up1
-                v1 = center1 + offset1
-                n1 = x_factor * right1 + y_factor * up1
-                n1_len = np.linalg.norm(n1)
-                if n1_len > 1e-6:
-                    n1 = n1 / n1_len
-                glNormal3f(*n1)
-                glVertex3f(*v1)
-
-                offset2 = highlight_width * x_factor * right2 + height * y_factor * up2
-                v2 = center2 + offset2
-                n2 = x_factor * right2 + y_factor * up2
-                n2_len = np.linalg.norm(n2)
-                if n2_len > 1e-6:
-                    n2 = n2 / n2_len
-                glNormal3f(*n2)
-                glVertex3f(*v2)
-
-        glEnd()
+        if vertices.size > 0:
+            glEnableClientState(GL_VERTEX_ARRAY)
+            glEnableClientState(GL_NORMAL_ARRAY)
+            glVertexPointer(3, GL_FLOAT, 0, vertices)
+            glNormalPointer(GL_FLOAT, 0, normals)
+            glDrawArrays(GL_TRIANGLES, 0, vertices.size // 3)
+            glDisableClientState(GL_NORMAL_ARRAY)
+            glDisableClientState(GL_VERTEX_ARRAY)
 
         glDepthMask(GL_TRUE)
         glDisable(GL_BLEND)
@@ -445,7 +410,7 @@ class Strand:
             self._draw_shape_cap(self.end, tangent_end, segments=cap_segments)
 
     def _draw_chain_as_spline(self, curve_segments=None, tube_segments=None, cap_segments=32):
-        """Draw the entire strand chain as one continuous Bezier spline"""
+        """Draw the entire strand chain as one continuous Bezier spline."""
         if curve_segments is None:
             curve_segments = self.curve_segments
         if tube_segments is None:
@@ -462,21 +427,21 @@ class Strand:
             if len(all_points) < 2:
                 continue
 
-            vbo_entry = self._get_or_build_chain_vbo(
-                chain,
-                all_points,
-                frames,
-                curve_segments=curve_segments,
-                tube_segments=tube_segments
-            )
-            if vbo_entry:
-                self._draw_tube_vbo(vbo_entry)
-            else:
-                # Draw as one continuous tube (fallback)
+            if Strand._defer_vbo_cleanup:
+                # During drag: build arrays fresh each frame (no VBO overhead)
                 self._draw_tube_from_points(all_points, frames, tube_segments=tube_segments)
+            else:
+                # Normal: use VBO cache for fast repeated rendering
+                vbo_entry = self._get_or_build_chain_vbo(
+                    chain, all_points, frames,
+                    curve_segments=curve_segments,
+                    tube_segments=tube_segments
+                )
+                if vbo_entry:
+                    self._draw_tube_vbo(vbo_entry)
+                else:
+                    self._draw_tube_from_points(all_points, frames, tube_segments=tube_segments)
 
-            # Draw end caps only at the true start and end of the chain
-            # Pass frames and points so end caps use the same orientation as the tube
             self._draw_chain_end_caps(chain, all_points, frames, cap_segments=cap_segments)
 
     def _get_chain_geometry(self, chain, curve_segments):
@@ -618,71 +583,99 @@ class Strand:
         return entry
 
     def _build_tube_mesh(self, points, frames, tube_segments):
-        """Build triangle mesh data for a tube and return vertex/normal arrays."""
+        """Build triangle mesh data for a tube using vectorized numpy operations.
+
+        Returns flat float32 arrays of (vertices, normals) suitable for
+        glVertexPointer / glDrawArrays(GL_TRIANGLES, ...).
+        """
         if len(points) < 2 or len(frames) < 2 or tube_segments < 3:
             return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
 
-        # Get cross-section profile points based on shape
         cs_points, height_ratio = self._get_cross_section_points(tube_segments)
         ring_count = len(cs_points)
         height = self.width * height_ratio
+        width = self.width
 
-        vertices = []
-        normals = []
+        # Convert inputs to contiguous arrays  --  shapes:
+        #   pts:    (N, 3)
+        #   rights: (N, 3)     ups: (N, 3)
+        #   cs:     (R, 2)     where R = ring_count
+        pts = np.ascontiguousarray(points, dtype=np.float64)
+        cs = np.array(cs_points, dtype=np.float64)                # (R, 2)
+        N = len(pts) - 1  # number of segments along the curve
 
-        for i in range(len(points) - 1):
-            right1, up1 = frames[i]
-            right2, up2 = frames[i + 1]
-            center1 = points[i]
-            center2 = points[i + 1]
+        # Unpack frames into (N+1, 3) arrays
+        rights = np.array([f[0] for f in frames], dtype=np.float64)  # (N+1, 3)
+        ups    = np.array([f[1] for f in frames], dtype=np.float64)  # (N+1, 3)
 
-            for j in range(ring_count):
-                j_next = (j + 1) % ring_count
+        # Cross-section factors
+        x_cs = cs[:, 0]  # (R,)
+        y_cs = cs[:, 1]  # (R,)
 
-                # Get cross-section factors
-                x0, y0 = cs_points[j]
-                x1, y1 = cs_points[j_next]
+        # Next cross-section index (wraps around)
+        j_next = np.arange(1, ring_count + 1) % ring_count
 
-                v00 = center1 + (self.width * x0 * right1 + height * y0 * up1)
-                v01 = center1 + (self.width * x1 * right1 + height * y1 * up1)
-                v10 = center2 + (self.width * x0 * right2 + height * y0 * up2)
-                v11 = center2 + (self.width * x1 * right2 + height * y1 * up2)
+        x0 = x_cs                # (R,)
+        y0 = y_cs
+        x1 = x_cs[j_next]       # (R,)
+        y1 = y_cs[j_next]
 
-                n00 = x0 * right1 + y0 * up1
-                n01 = x1 * right1 + y1 * up1
-                n10 = x0 * right2 + y0 * up2
-                n11 = x1 * right2 + y1 * up2
+        # Slice into "current" and "next" along curve
+        c1 = pts[:-1]            # (N, 3)
+        c2 = pts[1:]             # (N, 3)
+        r1 = rights[:-1]         # (N, 3)
+        r2 = rights[1:]          # (N, 3)
+        u1 = ups[:-1]            # (N, 3)
+        u2 = ups[1:]             # (N, 3)
 
-                n00_len = np.linalg.norm(n00)
-                n01_len = np.linalg.norm(n01)
-                n10_len = np.linalg.norm(n10)
-                n11_len = np.linalg.norm(n11)
-                if n00_len > 1e-6:
-                    n00 = n00 / n00_len
-                if n01_len > 1e-6:
-                    n01 = n01 / n01_len
-                if n10_len > 1e-6:
-                    n10 = n10 / n10_len
-                if n11_len > 1e-6:
-                    n11 = n11 / n11_len
+        # Broadcast to (N, R, 3):
+        #   vertex = center + width*x*right + height*y*up
+        # Use einsum-style broadcasting:
+        #   c1[:, None, :]          -> (N, 1, 3)
+        #   x0[None, :, None]      -> (1, R, 1)
+        #   r1[:, None, :]          -> (N, 1, 3)
 
-                # Triangle 1: v00, v10, v11
-                vertices.extend([v00[0], v00[1], v00[2],
-                                 v10[0], v10[1], v10[2],
-                                 v11[0], v11[1], v11[2]])
-                normals.extend([n00[0], n00[1], n00[2],
-                                n10[0], n10[1], n10[2],
-                                n11[0], n11[1], n11[2]])
+        v00 = c1[:, None, :] + width * x0[None, :, None] * r1[:, None, :] + height * y0[None, :, None] * u1[:, None, :]
+        v01 = c1[:, None, :] + width * x1[None, :, None] * r1[:, None, :] + height * y1[None, :, None] * u1[:, None, :]
+        v10 = c2[:, None, :] + width * x0[None, :, None] * r2[:, None, :] + height * y0[None, :, None] * u2[:, None, :]
+        v11 = c2[:, None, :] + width * x1[None, :, None] * r2[:, None, :] + height * y1[None, :, None] * u2[:, None, :]
+        # shapes: all (N, R, 3)
 
-                # Triangle 2: v00, v11, v01
-                vertices.extend([v00[0], v00[1], v00[2],
-                                 v11[0], v11[1], v11[2],
-                                 v01[0], v01[1], v01[2]])
-                normals.extend([n00[0], n00[1], n00[2],
-                                n11[0], n11[1], n11[2],
-                                n01[0], n01[1], n01[2]])
+        # Normals (unnormalized): n = x*right + y*up
+        n00 = x0[None, :, None] * r1[:, None, :] + y0[None, :, None] * u1[:, None, :]
+        n01 = x1[None, :, None] * r1[:, None, :] + y1[None, :, None] * u1[:, None, :]
+        n10 = x0[None, :, None] * r2[:, None, :] + y0[None, :, None] * u2[:, None, :]
+        n11 = x1[None, :, None] * r2[:, None, :] + y1[None, :, None] * u2[:, None, :]
 
-        return np.array(vertices, dtype=np.float32), np.array(normals, dtype=np.float32)
+        # Normalize normals
+        for n_arr in (n00, n01, n10, n11):
+            lens = np.linalg.norm(n_arr, axis=2, keepdims=True)
+            lens[lens < 1e-6] = 1.0
+            n_arr /= lens
+
+        # Assemble triangles: 2 triangles per quad = 6 vertices per (i, j)
+        # tri1: v00, v10, v11    tri2: v00, v11, v01
+        # Final shape: (N, R, 6, 3) -> flatten to (N*R*6*3,)
+        tris = np.empty((N, ring_count, 6, 3), dtype=np.float64)
+        tris[:, :, 0, :] = v00
+        tris[:, :, 1, :] = v10
+        tris[:, :, 2, :] = v11
+        tris[:, :, 3, :] = v00
+        tris[:, :, 4, :] = v11
+        tris[:, :, 5, :] = v01
+
+        nrms = np.empty((N, ring_count, 6, 3), dtype=np.float64)
+        nrms[:, :, 0, :] = n00
+        nrms[:, :, 1, :] = n10
+        nrms[:, :, 2, :] = n11
+        nrms[:, :, 3, :] = n00
+        nrms[:, :, 4, :] = n11
+        nrms[:, :, 5, :] = n01
+
+        vertices = np.ascontiguousarray(tris.reshape(-1), dtype=np.float32)
+        normals  = np.ascontiguousarray(nrms.reshape(-1), dtype=np.float32)
+
+        return vertices, normals
 
     def _draw_tube_vbo(self, entry):
         """Draw a cached tube mesh from VBOs."""
@@ -858,53 +851,24 @@ class Strand:
         return twisted_frames
 
     def _draw_tube_from_points(self, points, frames, tube_segments=None):
-        """Draw a tube along the given points using the provided frames"""
+        """Draw a tube using vectorized mesh + glDrawArrays (no per-vertex GL calls)."""
         if len(points) < 2 or len(frames) < 2:
             return
 
         if tube_segments is None:
             tube_segments = self.tube_segments
 
-        # Get cross-section profile points based on shape
-        cs_points, height_ratio = self._get_cross_section_points(tube_segments)
-        ring_count = len(cs_points)
-        height = self.width * height_ratio
+        vertices, normals = self._build_tube_mesh(points, frames, tube_segments)
+        if vertices.size == 0:
+            return
 
-        glBegin(GL_QUAD_STRIP)
-
-        for i in range(len(points) - 1):
-            right1, up1 = frames[i]
-            right2, up2 = frames[i + 1]
-            center1 = points[i]
-            center2 = points[i + 1]
-
-            for j in range(ring_count + 1):
-                idx = j % ring_count
-
-                # Get cross-section factors
-                x_factor, y_factor = cs_points[idx]
-
-                # First ring vertex
-                offset1 = self.width * x_factor * right1 + height * y_factor * up1
-                v1 = center1 + offset1
-                n1 = x_factor * right1 + y_factor * up1
-                n1_len = np.linalg.norm(n1)
-                if n1_len > 1e-6:
-                    n1 /= n1_len
-                glNormal3f(*n1)
-                glVertex3f(*v1)
-
-                # Second ring vertex
-                offset2 = self.width * x_factor * right2 + height * y_factor * up2
-                v2 = center2 + offset2
-                n2 = x_factor * right2 + y_factor * up2
-                n2_len = np.linalg.norm(n2)
-                if n2_len > 1e-6:
-                    n2 /= n2_len
-                glNormal3f(*n2)
-                glVertex3f(*v2)
-
-        glEnd()
+        glEnableClientState(GL_VERTEX_ARRAY)
+        glEnableClientState(GL_NORMAL_ARRAY)
+        glVertexPointer(3, GL_FLOAT, 0, vertices)
+        glNormalPointer(GL_FLOAT, 0, normals)
+        glDrawArrays(GL_TRIANGLES, 0, vertices.size // 3)
+        glDisableClientState(GL_NORMAL_ARRAY)
+        glDisableClientState(GL_VERTEX_ARRAY)
 
     def _draw_chain_end_caps(self, chain, all_points=None, frames=None, cap_segments=32):
         """

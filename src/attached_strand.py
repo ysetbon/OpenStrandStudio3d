@@ -274,11 +274,12 @@ class AttachedStrand(Strand):
         self._mark_geometry_dirty()
 
         # Sync attached strands at end if link_cps enabled (same as parent class)
+        # NOTE: Don't call update_start_from_parent() here - it moves the ENTIRE attached strand.
+        # Instead, let _propagate_to_attached_strands in move_mode.py handle the 2D-style
+        # propagation (only move the attached strand's start, not its end).
         if link_cps:
             for attached in self.attached_strands:
                 if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
-                    if hasattr(attached, 'update_start_from_parent'):
-                        attached.update_start_from_parent()
                     if hasattr(attached, 'sync_cp1_with_parent_c1'):
                         attached.sync_cp1_with_parent_c1()
 

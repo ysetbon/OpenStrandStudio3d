@@ -1056,9 +1056,6 @@ class MoveModeMixin:
                 delattr(self, "_move_along_direction")
             # Defer VBO cleanup during drag for performance
             Strand.begin_drag_operation()
-            # Compile display list for non-affected strands (rendered once, replayed each frame)
-            affected = self._get_move_affected_strands(strand, self.hovered_control_point)
-            self._compile_drag_display_list(affected)
             print(f"Moving {self.hovered_control_point.upper()} of {strand.name}")
 
     def _update_move(self, screen_x, screen_y, axis_mode="normal", shift_held=False, ctrl_held=False):
@@ -1242,14 +1239,6 @@ class MoveModeMixin:
         else:
             # Move whole strand
             strand.move(delta)
-
-        # Safety net: if any drag LOD target is not in the display list's affected
-        # set, invalidate the display list to avoid rendering stale geometry.
-        if self._drag_display_list_id != 0:
-            for target in self._drag_lod_targets:
-                if target not in self._drag_affected_strands:
-                    self._delete_drag_display_list()
-                    break
 
     def _move_connected_strands(self, strand, endpoint, delta):
         """
@@ -1533,11 +1522,10 @@ class MoveModeMixin:
         """End move operation"""
         if self.moving_strand:
             print(f"Finished moving {self.moving_strand.name}")
-        # Delete the display list - stale after geometry changed.
-        # DON'T call Strand.end_drag_operation() here — stay in individual
-        # rendering mode for fast subsequent drags.  Chain VBO rebuilds only
-        # happen when leaving move mode (set_mode).
-        self._delete_drag_display_list()
+        # Restore normal rendering (VBO-cached, full quality)
+        Strand.end_drag_operation()
+        # Request a chain rebuild timing measurement on the next paint
+        self._measure_chain_rebuild = True
 
         # Invalidate CP screen cache since points may have moved
         self._invalidate_cp_screen_cache()
