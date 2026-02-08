@@ -196,7 +196,7 @@ class Strand:
 
     def get_curve_points(self, num_segments=None):
         """
-        Get array of points along the Bezier curve.
+        Get array of points along the Bezier curve (vectorized).
 
         Args:
             num_segments: Number of segments (default: self.curve_segments)
@@ -211,10 +211,19 @@ class Strand:
         if cached and cached[0] == self._geom_version:
             return cached[1]
 
-        points = []
-        for i in range(num_segments + 1):
-            t = i / num_segments
-            points.append(self.get_bezier_point(t))
+        # Vectorized Bezier: compute all points in one numpy operation
+        t = np.linspace(0.0, 1.0, num_segments + 1, dtype=np.float64)  # (S+1,)
+        t2 = t * t
+        t3 = t2 * t
+        mt = 1.0 - t
+        mt2 = mt * mt
+        mt3 = mt2 * mt
+        # Broadcast (S+1,1) * (3,) → (S+1, 3)
+        pts = (mt3[:, None] * self.start[None, :] +
+               (3.0 * mt2 * t)[:, None] * self.control_point1[None, :] +
+               (3.0 * mt * t2)[:, None] * self.control_point2[None, :] +
+               t3[:, None] * self.end[None, :])
+        points = [pts[i] for i in range(len(pts))]
 
         self._curve_cache[num_segments] = (self._geom_version, points)
         return points
@@ -428,8 +437,16 @@ class Strand:
                 continue
 
             if Strand._defer_vbo_cleanup:
-                # During drag: build arrays fresh each frame (no VBO overhead)
-                self._draw_tube_from_points(all_points, frames, tube_segments=tube_segments)
+                # During drag: try VBO cache for non-affected chains (read-only lookup)
+                # If cache hit → render from GPU VBO (fast, chain hasn't changed)
+                # If cache miss → use fresh arrays (affected chain, geometry changed)
+                versions = tuple((id(s), s._geom_version) for s in chain)
+                vbo_key = (curve_segments, tube_segments, versions)
+                cached_vbo = self._vbo_cache.get(vbo_key)
+                if cached_vbo:
+                    self._draw_tube_vbo(cached_vbo)
+                else:
+                    self._draw_tube_from_points(all_points, frames, tube_segments=tube_segments)
             else:
                 # Normal: use VBO cache for fast repeated rendering
                 vbo_entry = self._get_or_build_chain_vbo(
@@ -587,26 +604,24 @@ class Strand:
 
         Returns flat float32 arrays of (vertices, normals) suitable for
         glVertexPointer / glDrawArrays(GL_TRIANGLES, ...).
+        Uses float32 throughout to halve memory and avoid dtype conversion.
         """
         if len(points) < 2 or len(frames) < 2 or tube_segments < 3:
             return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
 
         cs_points, height_ratio = self._get_cross_section_points(tube_segments)
         ring_count = len(cs_points)
-        height = self.width * height_ratio
-        width = self.width
+        height = np.float32(self.width * height_ratio)
+        width = np.float32(self.width)
 
-        # Convert inputs to contiguous arrays  --  shapes:
-        #   pts:    (N, 3)
-        #   rights: (N, 3)     ups: (N, 3)
-        #   cs:     (R, 2)     where R = ring_count
-        pts = np.ascontiguousarray(points, dtype=np.float64)
-        cs = np.array(cs_points, dtype=np.float64)                # (R, 2)
+        # Convert inputs to float32 arrays throughout
+        pts = np.ascontiguousarray(points, dtype=np.float32)
+        cs = np.array(cs_points, dtype=np.float32)               # (R, 2)
         N = len(pts) - 1  # number of segments along the curve
 
         # Unpack frames into (N+1, 3) arrays
-        rights = np.array([f[0] for f in frames], dtype=np.float64)  # (N+1, 3)
-        ups    = np.array([f[1] for f in frames], dtype=np.float64)  # (N+1, 3)
+        rights = np.array([f[0] for f in frames], dtype=np.float32)  # (N+1, 3)
+        ups    = np.array([f[1] for f in frames], dtype=np.float32)  # (N+1, 3)
 
         # Cross-section factors
         x_cs = cs[:, 0]  # (R,)
@@ -628,18 +643,11 @@ class Strand:
         u1 = ups[:-1]            # (N, 3)
         u2 = ups[1:]             # (N, 3)
 
-        # Broadcast to (N, R, 3):
-        #   vertex = center + width*x*right + height*y*up
-        # Use einsum-style broadcasting:
-        #   c1[:, None, :]          -> (N, 1, 3)
-        #   x0[None, :, None]      -> (1, R, 1)
-        #   r1[:, None, :]          -> (N, 1, 3)
-
+        # Broadcast to (N, R, 3): vertex = center + width*x*right + height*y*up
         v00 = c1[:, None, :] + width * x0[None, :, None] * r1[:, None, :] + height * y0[None, :, None] * u1[:, None, :]
         v01 = c1[:, None, :] + width * x1[None, :, None] * r1[:, None, :] + height * y1[None, :, None] * u1[:, None, :]
         v10 = c2[:, None, :] + width * x0[None, :, None] * r2[:, None, :] + height * y0[None, :, None] * u2[:, None, :]
         v11 = c2[:, None, :] + width * x1[None, :, None] * r2[:, None, :] + height * y1[None, :, None] * u2[:, None, :]
-        # shapes: all (N, R, 3)
 
         # Normals (unnormalized): n = x*right + y*up
         n00 = x0[None, :, None] * r1[:, None, :] + y0[None, :, None] * u1[:, None, :]
@@ -647,16 +655,15 @@ class Strand:
         n10 = x0[None, :, None] * r2[:, None, :] + y0[None, :, None] * u2[:, None, :]
         n11 = x1[None, :, None] * r2[:, None, :] + y1[None, :, None] * u2[:, None, :]
 
-        # Normalize normals
-        for n_arr in (n00, n01, n10, n11):
-            lens = np.linalg.norm(n_arr, axis=2, keepdims=True)
-            lens[lens < 1e-6] = 1.0
-            n_arr /= lens
+        # Vectorized normal normalization (all 4 at once instead of loop)
+        all_n = np.stack([n00, n01, n10, n11])  # (4, N, R, 3)
+        lens = np.linalg.norm(all_n, axis=3, keepdims=True)
+        lens[lens < 1e-6] = 1.0
+        all_n /= lens
+        n00, n01, n10, n11 = all_n[0], all_n[1], all_n[2], all_n[3]
 
         # Assemble triangles: 2 triangles per quad = 6 vertices per (i, j)
-        # tri1: v00, v10, v11    tri2: v00, v11, v01
-        # Final shape: (N, R, 6, 3) -> flatten to (N*R*6*3,)
-        tris = np.empty((N, ring_count, 6, 3), dtype=np.float64)
+        tris = np.empty((N, ring_count, 6, 3), dtype=np.float32)
         tris[:, :, 0, :] = v00
         tris[:, :, 1, :] = v10
         tris[:, :, 2, :] = v11
@@ -664,7 +671,7 @@ class Strand:
         tris[:, :, 4, :] = v11
         tris[:, :, 5, :] = v01
 
-        nrms = np.empty((N, ring_count, 6, 3), dtype=np.float64)
+        nrms = np.empty((N, ring_count, 6, 3), dtype=np.float32)
         nrms[:, :, 0, :] = n00
         nrms[:, :, 1, :] = n10
         nrms[:, :, 2, :] = n11
@@ -672,8 +679,8 @@ class Strand:
         nrms[:, :, 4, :] = n11
         nrms[:, :, 5, :] = n01
 
-        vertices = np.ascontiguousarray(tris.reshape(-1), dtype=np.float32)
-        normals  = np.ascontiguousarray(nrms.reshape(-1), dtype=np.float32)
+        vertices = np.ascontiguousarray(tris.reshape(-1))
+        normals  = np.ascontiguousarray(nrms.reshape(-1))
 
         return vertices, normals
 
@@ -694,77 +701,108 @@ class Strand:
         glDisableClientState(GL_VERTEX_ARRAY)
 
     def _compute_chain_frames(self, points):
-        """Compute parallel transport frames for a chain of points"""
-        frames = []
+        """Compute parallel transport frames for a chain of points (optimized).
+
+        Uses batch tangent computation and pure Python scalar math in the
+        sequential loop to avoid numpy function-call overhead (~10-50us each).
+        """
+        from math import sqrt, acos, cos, sin
+
         n = len(points)
-
         if n < 2:
-            return frames
+            return []
 
-        # Initial frame at first point
-        tangent = points[1] - points[0]
-        tangent_len = np.linalg.norm(tangent)
-        if tangent_len > 1e-6:
-            tangent /= tangent_len
+        # Batch-compute all tangents at once (vectorized)
+        pts = np.array(points, dtype=np.float64)  # (N, 3)
+        tangents = np.empty((n, 3), dtype=np.float64)
+        tangents[:-1] = pts[1:] - pts[:-1]
+        tangents[-1] = tangents[-2].copy()
+        t_lens = np.linalg.norm(tangents, axis=1, keepdims=True)
+        t_lens[t_lens < 1e-6] = 1.0
+        tangents /= t_lens
 
-        # Find initial right and up vectors
-        if abs(tangent[1]) < 0.9:
-            up_hint = np.array([0.0, 1.0, 0.0])
+        # Extract to Python lists for zero-overhead loop access
+        tan_x = tangents[:, 0].tolist()
+        tan_y = tangents[:, 1].tolist()
+        tan_z = tangents[:, 2].tolist()
+
+        # Initial frame
+        t0x, t0y, t0z = tan_x[0], tan_y[0], tan_z[0]
+        if abs(t0y) < 0.9:
+            # cross(tangent, [0,1,0])
+            rx, ry, rz = t0z, 0.0, -t0x
         else:
-            up_hint = np.array([0.0, 0.0, 1.0])
+            # cross(tangent, [0,0,1])
+            rx, ry, rz = -t0y, t0x, 0.0
+        r_len = sqrt(rx * rx + ry * ry + rz * rz)
+        if r_len > 1e-6:
+            rx /= r_len; ry /= r_len; rz /= r_len
 
-        right = np.cross(tangent, up_hint)
-        right_len = np.linalg.norm(right)
-        if right_len > 1e-6:
-            right /= right_len
+        # up = cross(right, tangent)
+        ux = ry * t0z - rz * t0y
+        uy = rz * t0x - rx * t0z
+        uz = rx * t0y - ry * t0x
+        u_len = sqrt(ux * ux + uy * uy + uz * uz)
+        if u_len > 1e-6:
+            ux /= u_len; uy /= u_len; uz /= u_len
 
-        up = np.cross(right, tangent)
-        up_len = np.linalg.norm(up)
-        if up_len > 1e-6:
-            up /= up_len
+        # Pre-allocate output arrays
+        rights = np.empty((n, 3), dtype=np.float64)
+        ups = np.empty((n, 3), dtype=np.float64)
+        rights[0, 0] = rx; rights[0, 1] = ry; rights[0, 2] = rz
+        ups[0, 0] = ux; ups[0, 1] = uy; ups[0, 2] = uz
 
-        frames.append((right.copy(), up.copy()))
-
-        # Propagate frame using parallel transport
+        # Sequential parallel transport with pure Python scalar math
+        px, py, pz = t0x, t0y, t0z
         for i in range(1, n):
-            if i < n - 1:
-                new_tangent = points[i + 1] - points[i]
-            else:
-                new_tangent = points[i] - points[i - 1]
+            tx = tan_x[i]; ty = tan_y[i]; tz = tan_z[i]
 
-            new_tangent_len = np.linalg.norm(new_tangent)
-            if new_tangent_len > 1e-6:
-                new_tangent /= new_tangent_len
-
-            # Parallel transport the frame
-            dot = np.dot(tangent, new_tangent)
+            dot = px * tx + py * ty + pz * tz
 
             if dot < -0.99:
-                # Nearly opposite - flip
-                right = -right
+                rx, ry, rz = -rx, -ry, -rz
             elif dot < 0.99:
-                # Rotate frame
-                axis = np.cross(tangent, new_tangent)
-                axis_len = np.linalg.norm(axis)
-                if axis_len > 1e-6:
-                    axis /= axis_len
-                    angle = np.arccos(np.clip(dot, -1.0, 1.0))
-                    right = self._rotate_vector(right, axis, angle)
+                # Rotation axis = cross(prev_tangent, tangent)
+                ax = py * tz - pz * ty
+                ay = pz * tx - px * tz
+                az = px * ty - py * tx
+                a_len = sqrt(ax * ax + ay * ay + az * az)
+                if a_len > 1e-6:
+                    ax /= a_len; ay /= a_len; az /= a_len
+                    angle = acos(max(-1.0, min(1.0, dot)))
+                    cos_a = cos(angle)
+                    sin_a = sin(angle)
+                    # Rodrigues' rotation of right vector
+                    d = ax * rx + ay * ry + az * rz
+                    cx = ay * rz - az * ry
+                    cy = az * rx - ax * rz
+                    cz = ax * ry - ay * rx
+                    one_minus_cos = 1.0 - cos_a
+                    rx = rx * cos_a + cx * sin_a + ax * d * one_minus_cos
+                    ry = ry * cos_a + cy * sin_a + ay * d * one_minus_cos
+                    rz = rz * cos_a + cz * sin_a + az * d * one_minus_cos
 
-            up = np.cross(right, new_tangent)
-            up_len = np.linalg.norm(up)
-            if up_len > 1e-6:
-                up /= up_len
+            # up = cross(right, tangent)
+            ux = ry * tz - rz * ty
+            uy = rz * tx - rx * tz
+            uz = rx * ty - ry * tx
+            u_len = sqrt(ux * ux + uy * uy + uz * uz)
+            if u_len > 1e-6:
+                ux /= u_len; uy /= u_len; uz /= u_len
 
-            right = np.cross(new_tangent, up)
-            right_len = np.linalg.norm(right)
-            if right_len > 1e-6:
-                right /= right_len
+            # right = cross(tangent, up)
+            rx = ty * uz - tz * uy
+            ry = tz * ux - tx * uz
+            rz = tx * uy - ty * ux
+            r_len = sqrt(rx * rx + ry * ry + rz * rz)
+            if r_len > 1e-6:
+                rx /= r_len; ry /= r_len; rz /= r_len
 
-            frames.append((right.copy(), up.copy()))
-            tangent = new_tangent
+            rights[i, 0] = rx; rights[i, 1] = ry; rights[i, 2] = rz
+            ups[i, 0] = ux; ups[i, 1] = uy; ups[i, 2] = uz
+            px = tx; py = ty; pz = tz
 
-        return frames
+        return [(rights[i], ups[i]) for i in range(n)]
 
     def _rotate_vector(self, v, axis, angle):
         """Rotate vector v around axis by angle (Rodrigues' formula)"""
