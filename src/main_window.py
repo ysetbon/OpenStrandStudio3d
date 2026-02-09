@@ -7,7 +7,8 @@ import json
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QToolBar, QAction, QStatusBar, QSplitter, QLabel,
-    QFileDialog, QMessageBox, QActionGroup, QInputDialog
+    QFileDialog, QMessageBox, QActionGroup, QInputDialog,
+    QDialog, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
@@ -227,6 +228,13 @@ class MainWindow(QMainWindow):
         self.action_strand_profile = QAction("Profile", self)
         self.action_strand_profile.triggered.connect(self._open_strand_profile_editor)
         toolbar.addAction(self.action_strand_profile)
+
+        toolbar.addSeparator()
+
+        # About button
+        self.action_about = QAction("About", self)
+        self.action_about.triggered.connect(self._show_about_dialog)
+        toolbar.addAction(self.action_about)
 
         # Group actions for exclusive selection
         self.mode_actions = [
@@ -1278,3 +1286,88 @@ class MainWindow(QMainWindow):
                 self, "Export Points Error",
                 f"Failed to export points:\n{str(e)}"
             )
+
+    def _show_about_dialog(self):
+        """Show the About dialog with version and credits"""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About OpenStrandStudio 3D")
+        dlg.setFixedSize(520, 420)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(30, 25, 30, 20)
+        layout.setSpacing(8)
+
+        title = QLabel("OpenStrandStudio 3D")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 22px; font-weight: bold; color: #7B68EE;")
+        layout.addWidget(title)
+
+        version_label = QLabel("Version 1.01")
+        version_label.setAlignment(Qt.AlignCenter)
+        version_label.setStyleSheet("font-size: 15px; color: #C0C0C0;")
+        layout.addWidget(version_label)
+
+        layout.addSpacing(6)
+
+        info = QLabel()
+        info.setAlignment(Qt.AlignCenter)
+        info.setWordWrap(True)
+        info.setOpenExternalLinks(True)
+        info.setTextFormat(Qt.RichText)
+        info.setText(
+            '<p style="font-size:13px; color:#E8E8E8;">'
+            'Based on the original <b>OpenStrand Studio</b>.'
+            '</p>'
+            '<p style="font-size:13px; color:#E8E8E8;">'
+            'OpenStrand Studio was developed by <b>Yonatan Setbon</b>. '
+            'The software is designed to create any knot in a diagrammatic way '
+            'by using layers for each section of a strand and incorporating '
+            'masked layers that allow for an "over-under effect."'
+            '</p>'
+            '<p style="font-size:13px; color:#E8E8E8;">'
+            'Yonatan runs a YouTube channel dedicated to lanyards called '
+            '<b><a href="https://www.youtube.com/@1anya7d" style="color:#7B68EE;">LanYarD</a></b>, '
+            'where many tutorials feature diagrams of knots. This software was '
+            'created to facilitate designing any knot, in order to demonstrate '
+            'and explain how to make complex tutorials involving knot tying.'
+            '</p>'
+            '<p style="font-size:13px; color:#E8E8E8;">'
+            'Contact: <a href="mailto:ysetbon@gmail.com" style="color:#7B68EE;">ysetbon@gmail.com</a>'
+            ' &nbsp;|&nbsp; '
+            '<a href="https://www.instagram.com/ysetbon/" style="color:#7B68EE;">Instagram</a>'
+            ' &nbsp;|&nbsp; '
+            '<a href="https://www.linkedin.com/in/yonatan-setbon-4a980986/" style="color:#7B68EE;">LinkedIn</a>'
+            '</p>'
+            '<p style="font-size:12px; color:#A0A0A0;">'
+            '\u00a9 2026 OpenStrand Studio'
+            '</p>'
+        )
+        layout.addWidget(info)
+
+        layout.addStretch()
+
+        ok_btn = QDialogButtonBox(QDialogButtonBox.Ok)
+        ok_btn.accepted.connect(dlg.accept)
+        layout.addWidget(ok_btn)
+
+        dlg.setStyleSheet("""
+            QDialog {
+                background-color: #2D2D30;
+            }
+            QLabel a {
+                color: #7B68EE;
+            }
+            QPushButton {
+                background-color: #353538;
+                border: 1px solid #3E3E42;
+                border-radius: 4px;
+                padding: 6px 20px;
+                color: #E8E8E8;
+                min-width: 70px;
+            }
+            QPushButton:hover {
+                background-color: #454548;
+            }
+        """)
+
+        dlg.exec_()
