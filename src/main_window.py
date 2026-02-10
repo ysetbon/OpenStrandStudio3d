@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QDialog, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QPixmap
 
 from strand_drawing_canvas import StrandDrawingCanvas
 from layer_panel import LayerPanel
@@ -1289,13 +1289,23 @@ class MainWindow(QMainWindow):
 
     def _show_about_dialog(self):
         """Show the About dialog with version and credits"""
+        import os
         dlg = QDialog(self)
         dlg.setWindowTitle("About OpenStrandStudio 3D")
-        dlg.setFixedSize(520, 420)
+        dlg.setFixedSize(520, 460)
 
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(30, 25, 30, 20)
         layout.setSpacing(8)
+
+        # Show the overhand knot icon
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "box_stitch_3d_256.png")
+        if os.path.exists(icon_path):
+            icon_label = QLabel()
+            icon_label.setAlignment(Qt.AlignCenter)
+            pixmap = QPixmap(icon_path).scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            icon_label.setPixmap(pixmap)
+            layout.addWidget(icon_label)
 
         title = QLabel("OpenStrandStudio 3D")
         title.setAlignment(Qt.AlignCenter)
