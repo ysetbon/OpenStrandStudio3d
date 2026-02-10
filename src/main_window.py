@@ -3,11 +3,10 @@ OpenStrandStudio 3D - Main Window
 Contains the main application window with canvas and layer panel
 """
 
-import json
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QToolBar, QAction, QStatusBar, QSplitter, QLabel,
-    QFileDialog, QMessageBox, QActionGroup, QInputDialog,
+    QMessageBox, QActionGroup,
     QDialog, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt
@@ -18,9 +17,13 @@ from layer_panel import LayerPanel
 from undo_redo_manager import UndoRedoManager
 from strand_profile_dialog import StrandProfileDialog
 from user_settings import get_settings
+from save_project import SaveProjectMixin
+from load_project import LoadProjectMixin
+from load_points import LoadPointsMixin
+from export_points import ExportPointsMixin
 
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixin, ExportPointsMixin):
     """Main application window for OpenStrandStudio 3D"""
 
     def __init__(self):
@@ -32,9 +35,11 @@ class MainWindow(QMainWindow):
         self.canvas = None
         self.layer_panel = None
         self.undo_redo_manager = None
+        self.layer_state_manager = None
 
         self._setup_ui()
         self._setup_undo_redo()
+        self._setup_layer_state_manager()
         self._setup_toolbar()
         self._setup_statusbar()
         self._connect_signals()
@@ -80,6 +85,16 @@ class MainWindow(QMainWindow):
 
         # Store reference on canvas for easy access from canvas operations
         self.canvas.undo_redo_manager = self.undo_redo_manager
+
+    def _setup_layer_state_manager(self):
+        """Setup the layer state manager after canvas and layer panel are created."""
+        from layer_state_manager import LayerStateManager
+
+        self.layer_state_manager = LayerStateManager(self.canvas)
+        self.layer_state_manager.set_layer_panel(self.layer_panel)
+
+        # Store reference on canvas for easy access from mode mixins
+        self.canvas.layer_state_manager = self.layer_state_manager
 
     def _setup_toolbar(self):
         """Setup the main toolbar"""
@@ -426,6 +441,7 @@ class MainWindow(QMainWindow):
         self.canvas.camera_changed.connect(self._on_camera_changed)
         self.canvas.strand_created.connect(self._on_strand_created)
         self.canvas.strand_selected.connect(self._on_strand_selected)
+        self.canvas.strand_deleted.connect(self._on_strand_deleted)
 
         # Layer panel signals
         self.layer_panel.strand_selected.connect(self.canvas.select_strand_by_name)
@@ -822,6 +838,10 @@ class MainWindow(QMainWindow):
         # This follows the pattern from OpenStrand 106
         self._set_mode("attach")
 
+    def _on_strand_deleted(self, strand_name: str):
+        """Handle strand deletion"""
+        self.layer_panel.remove_strand(strand_name)
+
     def _on_strand_selected(self, strand_name: str):
         """Handle strand selection"""
         self.layer_panel.select_strand(strand_name)
@@ -888,6 +908,10 @@ class MainWindow(QMainWindow):
         if self.canvas.selected_strand:
             self.layer_panel.select_strand(self.canvas.selected_strand.name)
 
+        # Update layer state manager
+        if self.layer_state_manager:
+            self.layer_state_manager.save_current_state()
+
     def _on_redo_performed(self):
         """Handle redo completion - sync layer panel"""
         self.layer_panel.clear()
@@ -897,6 +921,10 @@ class MainWindow(QMainWindow):
         # Update selection in layer panel
         if self.canvas.selected_strand:
             self.layer_panel.select_strand(self.canvas.selected_strand.name)
+
+        # Update layer state manager
+        if self.layer_state_manager:
+            self.layer_state_manager.save_current_state()
 
     # ==================== File Operations ====================
 
@@ -917,375 +945,15 @@ class MainWindow(QMainWindow):
         self.canvas.clear_project()
         self.layer_panel.clear()
         self.undo_redo_manager.clear_history()
+        if self.layer_state_manager:
+            self.layer_state_manager.save_current_state()
         self.current_project_file = None
         self.setWindowTitle("OpenStrandStudio 3D - New Project")
         self.statusbar.showMessage("New project created", 3000)
 
-    def _save_project(self):
-        """Save the project to a JSON file"""
-        # Get file path
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Project",
-            self.current_project_file or "project.oss3d",
-            "OpenStrandStudio 3D Files (*.oss3d);;JSON Files (*.json);;All Files (*)"
-        )
-
-        if not file_path:
-            return  # User cancelled
-
-        try:
-            # Get project data from canvas
-            project_data = self.canvas.get_project_data()
-
-            # Write to file with nice formatting
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(project_data, f, indent=2)
-
-            self.current_project_file = file_path
-            self.setWindowTitle(f"OpenStrandStudio 3D - {file_path.split('/')[-1].split(chr(92))[-1]}")
-            self.statusbar.showMessage(f"Saved: {file_path}", 3000)
-
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Save Error",
-                f"Failed to save project:\n{str(e)}"
-            )
-
-    def _load_project(self):
-        """Load a project from a JSON file"""
-        # Ask for confirmation if there are strands
-        if self.canvas.strands:
-            reply = QMessageBox.question(
-                self,
-                "Load Project",
-                "This will replace the current project. Continue?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply != QMessageBox.Yes:
-                return
-
-        # Get file path
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Load Project",
-            "",
-            "OpenStrandStudio 3D Files (*.oss3d);;JSON Files (*.json);;All Files (*)"
-        )
-
-        if not file_path:
-            return  # User cancelled
-
-        try:
-            # Read project data
-            with open(file_path, 'r', encoding='utf-8') as f:
-                project_data = json.load(f)
-
-            # Clear layer panel
-            self.layer_panel.clear()
-
-            # Load into canvas
-            self.canvas.load_project_data(project_data)
-
-            # Clear undo history (fresh start with loaded project)
-            self.undo_redo_manager.clear_history()
-
-            # Update layer panel with loaded strands
-            for strand in self.canvas.strands:
-                self.layer_panel.add_strand(strand.name, color=strand.color)
-
-            self.current_project_file = file_path
-            self.setWindowTitle(f"OpenStrandStudio 3D - {file_path.split('/')[-1].split(chr(92))[-1]}")
-            self.statusbar.showMessage(f"Loaded: {file_path}", 3000)
-
-        except json.JSONDecodeError as e:
-            QMessageBox.critical(
-                self,
-                "Load Error",
-                f"Invalid JSON file:\n{str(e)}"
-            )
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Load Error",
-                f"Failed to load project:\n{str(e)}"
-            )
-
-    def _load_points(self):
-        """Load points from a JSON file and create strands from consecutive points"""
-        # Get file path
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Load Points",
-            "",
-            "JSON Files (*.json);;All Files (*)"
-        )
-
-        if not file_path:
-            return  # User cancelled
-
-        try:
-            # Read points data
-            with open(file_path, 'r', encoding='utf-8') as f:
-                points = json.load(f)
-
-            # Validate: must be a list of 3D points
-            if not isinstance(points, list) or len(points) < 2:
-                QMessageBox.warning(
-                    self,
-                    "Load Points",
-                    "JSON must contain a list of at least 2 points."
-                )
-                return
-
-            # Validate each point is [x, y, z]
-            for i, point in enumerate(points):
-                if not isinstance(point, list) or len(point) != 3:
-                    QMessageBox.warning(
-                        self,
-                        "Load Points",
-                        f"Point {i} is invalid. Each point must be [x, y, z]."
-                    )
-                    return
-
-            # Import Strand, AttachedStrand and numpy
-            from strand import Strand
-            from attached_strand import AttachedStrand
-            import numpy as np
-
-            # Ask user for strand length
-            strand_length, ok = QInputDialog.getDouble(
-                self, "Strand Length",
-                "Length of each strand:",
-                self._last_load_strand_length,
-                0.2, 5.0, 1
-            )
-            if not ok:
-                return
-            self._last_load_strand_length = strand_length
-            self._original_segment_lengths = []
-            STRAND_LENGTH = strand_length
-
-            # Get next set number for naming
-            set_number = self.canvas._get_next_set_number()
-
-            # Get or assign color for this set
-            if set_number not in self.canvas.set_colors:
-                palette_idx = (int(set_number) - 1) % len(self.canvas._color_palette)
-                self.canvas.set_colors[set_number] = self.canvas._color_palette[palette_idx]
-
-            color = self.canvas.set_colors[set_number]
-
-            # Convert points to numpy arrays
-            np_points = [np.array(p, dtype=float) for p in points]
-
-            # Create strands using direction vectors from tiny segments
-            # Each strand is STRAND_LENGTH units long in the direction of the original segment
-            created_strands = []
-            strand_index = 1
-            previous_strand = None
-
-            for i in range(len(np_points) - 1):
-                # Get direction vector from tiny segment (points[i] → points[i+1])
-                direction = np_points[i + 1] - np_points[i]
-                length = np.linalg.norm(direction)
-
-                if length < 1e-10:
-                    continue  # Skip zero-length segments
-
-                self._original_segment_lengths.append(length)
-
-                # Normalize direction
-                direction_normalized = direction / length
-
-                strand_name = f"{set_number}_{strand_index}"
-
-                if previous_strand is None:
-                    # First strand: regular Strand starting at first point
-                    start = np_points[0].copy()
-                    end = start + direction_normalized * STRAND_LENGTH
-
-                    strand = Strand(
-                        start=start,
-                        end=end,
-                        name=strand_name,
-                        color=color,
-                        width=self.canvas.default_strand_width
-                    )
-                else:
-                    # Subsequent strands: AttachedStrand connected to previous strand's end
-                    # Calculate end position based on direction
-                    end_position = previous_strand.end + direction_normalized * STRAND_LENGTH
-
-                    strand = AttachedStrand(
-                        parent_strand=previous_strand,
-                        attachment_side=1,  # Attach to parent's end
-                        end_position=end_position,
-                        name=strand_name
-                    )
-
-                    # Reset control points to default (straight line)
-                    # AttachedStrand aligns CP1 for smooth curves, but we want straight
-                    strand._init_control_points()
-
-                # Apply default profile settings
-                strand.height_ratio = self.canvas.default_height_ratio
-                strand.cross_section_shape = self.canvas.default_cross_section_shape
-                strand.corner_radius = self.canvas.default_corner_radius
-
-                self.canvas.strands.append(strand)
-                created_strands.append(strand)
-
-                previous_strand = strand
-                strand_index += 1
-
-            # Update layer panel
-            for strand in created_strands:
-                self.layer_panel.add_strand(strand.name, color=strand.color)
-
-            # Select the first created strand
-            if created_strands:
-                self.canvas.selected_strand = created_strands[0]
-                self.canvas.strand_selected.emit(created_strands[0].name)
-
-            self.canvas.update()
-            self.statusbar.showMessage(f"Loaded {len(created_strands)} strands from points", 3000)
-
-        except json.JSONDecodeError as e:
-            QMessageBox.critical(
-                self,
-                "Load Points Error",
-                f"Invalid JSON file:\n{str(e)}"
-            )
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Load Points Error",
-                f"Failed to load points:\n{str(e)}"
-            )
-
-    def _export_points(self):
-        """Export strand positions as a JSON point list, reversing the unit conversion."""
-        import numpy as np
-
-        strands = self.canvas.strands
-        if not strands or not self._original_segment_lengths:
-            QMessageBox.warning(self, "Export Points",
-                                "No loaded points to export. Use Load Points first.")
-            return
-
-        # Ask for export scale factor via a custom dialog with explanation.
-        from PyQt5.QtWidgets import QDialog, QDialogButtonBox, QDoubleSpinBox
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Export Scale")
-        dlg.setStyleSheet("""
-            QDialog {
-                background-color: #2D2D30;
-                min-width: 350px;
-            }
-            QLabel {
-                color: #E8E8E8;
-                font-size: 18px;
-            }
-            QPushButton {
-                background-color: #353538;
-                border: 1px solid #3E3E42;
-                border-radius: 4px;
-                padding: 8px 22px;
-                color: #E8E8E8;
-                font-size: 15px;
-                font-weight: 500;
-                min-width: 98px;
-            }
-            QPushButton:hover {
-                background-color: #454548;
-                border-color: #5A5A5D;
-            }
-            QPushButton:pressed {
-                background-color: #2A2A2D;
-            }
-            QDoubleSpinBox {
-                background-color: #353538;
-                border: 1px solid #3E3E42;
-                border-radius: 4px;
-                padding: 6px 11px;
-                color: #E8E8E8;
-                font-size: 17px;
-            }
-            QDoubleSpinBox::up-button,
-            QDoubleSpinBox::down-button {
-                background-color: #454548;
-                border: 1px solid #3E3E42;
-                width: 22px;
-            }
-            QDoubleSpinBox::up-button:hover,
-            QDoubleSpinBox::down-button:hover {
-                background-color: #5A5A5D;
-            }
-        """)
-        layout = QVBoxLayout(dlg)
-
-        info = QLabel(
-            "Scale factor for exported point spacing:\n\n"
-            "  1.0  =  original units (identical to loaded file)\n"
-            "  2.0  =  2x larger spacing between points\n"
-            "  0.5  =  half the original spacing\n\n"
-            "This only affects the exported file.\n"
-            "Re-importing always uses the Load strand length."
-        )
-        info.setWordWrap(True)
-        layout.addWidget(info)
-
-        spin = QDoubleSpinBox()
-        spin.setRange(0.1, 100.0)
-        spin.setDecimals(1)
-        spin.setValue(1.0)
-        spin.setSingleStep(0.1)
-        layout.addWidget(spin)
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
-        )
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
-        layout.addWidget(buttons)
-
-        if dlg.exec_() != QDialog.Accepted:
-            return
-        scale = spin.value()
-
-        # Reconstruct points using strand directions and original segment
-        # lengths, multiplied by the scale factor.
-        running = strands[0].start.copy()
-        points = [running.tolist()]
-        for i, strand in enumerate(strands):
-            direction = strand.end - strand.start
-            seg_len = np.linalg.norm(direction)
-            if seg_len < 1e-10:
-                continue
-            direction_normalized = direction / seg_len
-            orig_len = self._original_segment_lengths[i]
-            running = running + direction_normalized * orig_len * scale
-            points.append(running.tolist())
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Export Points", "", "JSON Files (*.json);;All Files (*)"
-        )
-        if not file_path:
-            return
-
-        try:
-            with open(file_path, "w") as f:
-                json.dump(points, f, indent=2)
-            self.statusbar.showMessage(
-                f"Exported {len(points)} points to {file_path}", 3000)
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Export Points Error",
-                f"Failed to export points:\n{str(e)}"
-            )
+    # Save/Load/Points methods provided by mixins:
+    # SaveProjectMixin (save_project.py), LoadProjectMixin (load_project.py),
+    # LoadPointsMixin (load_points.py), ExportPointsMixin (export_points.py)
 
     def _show_about_dialog(self):
         """Show the About dialog with version and credits"""

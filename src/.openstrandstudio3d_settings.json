@@ -5,6 +5,6 @@
   "default_corner_radius": 0.0,
   "show_grid": true,
   "show_axes": true,
-  "link_control_points": true,
+  "link_control_points": false,
   "move_edit_all": true
 }

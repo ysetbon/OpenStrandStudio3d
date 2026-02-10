@@ -1056,6 +1056,11 @@ class MoveModeMixin:
                 delattr(self, "_move_along_direction")
             # Defer VBO cleanup during drag for performance
             Strand.begin_drag_operation()
+
+            # Cache connections during drag to prevent recalculation
+            if hasattr(self, 'layer_state_manager') and self.layer_state_manager:
+                self.layer_state_manager.start_movement_operation()
+
             print(f"Moving {self.hovered_control_point.upper()} of {strand.name}")
 
     def _update_move(self, screen_x, screen_y, axis_mode="normal", shift_held=False, ctrl_held=False):
@@ -1529,6 +1534,10 @@ class MoveModeMixin:
 
         # Invalidate CP screen cache since points may have moved
         self._invalidate_cp_screen_cache()
+
+        # End movement caching and recalculate connections
+        if hasattr(self, 'layer_state_manager') and self.layer_state_manager:
+            self.layer_state_manager.end_movement_operation()
 
         self.moving_strand = None
         self.moving_control_point = None

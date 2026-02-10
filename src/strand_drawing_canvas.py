@@ -20,9 +20,10 @@ from rotate_group_strand import RotateGroupStrandMixin
 from stretch_mode import StretchModeMixin
 from rotate_mode import RotateModeMixin
 from angle_adjust_mode import AngleAdjustModeMixin
+from canvas_save_load import CanvasSaveLoadMixin
 
 
-class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachModeMixin, RotateGroupStrandMixin, StretchModeMixin, RotateModeMixin, AngleAdjustModeMixin):
+class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachModeMixin, RotateGroupStrandMixin, StretchModeMixin, RotateModeMixin, AngleAdjustModeMixin, CanvasSaveLoadMixin):
     """3D OpenGL canvas for strand visualization and manipulation"""
 
     # Signals
@@ -53,6 +54,9 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
         self.strands = []  # List of Strand objects
         self.selected_strand = None
         self.hovered_strand = None
+
+        # Layer state manager (set by main_window after creation)
+        self.layer_state_manager = None
 
         # Per-set color palette (like v106 - each set gets a distinct color)
         self.set_colors = {}  # set_number -> (r, g, b, a) color tuple
@@ -1558,6 +1562,11 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
             new_names.append(new_name)
 
         self.update()
+
+        # Update layer state manager after duplication
+        if hasattr(self, 'layer_state_manager') and self.layer_state_manager:
+            self.layer_state_manager.save_current_state()
+
         return new_set_number, new_names
 
     def _delete_selected_strand(self):
@@ -1579,6 +1588,10 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
 
             self.strand_deleted.emit(strand_name)
             self.strand_selected.emit("")
+
+            # Update layer state manager after deletion
+            if hasattr(self, 'layer_state_manager') and self.layer_state_manager:
+                self.layer_state_manager.save_current_state()
 
     def _project_point_to_screen(self, point_3d):
         """Project a 3D point to screen coordinates (x, y) in logical pixels, or None on failure."""
@@ -1847,6 +1860,9 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                     self.undo_redo_manager.save_state()
                 strand.visible = visible
                 self.update()
+                # Update layer state manager after visibility change
+                if hasattr(self, 'layer_state_manager') and self.layer_state_manager:
+                    self.layer_state_manager.save_current_state()
                 return
 
     def set_strand_color(self, name: str, color: tuple):
@@ -1858,6 +1874,9 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
                     self.undo_redo_manager.save_state()
                 strand.color = color
                 self.update()
+                # Update layer state manager after color change
+                if hasattr(self, 'layer_state_manager') and self.layer_state_manager:
+                    self.layer_state_manager.save_current_state()
                 return
 
     def update_color_for_set(self, set_number: int, color: tuple):
@@ -1878,149 +1897,14 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
 
         self.update()
 
+        # Update layer state manager after set color change
+        if hasattr(self, 'layer_state_manager') and self.layer_state_manager:
+            self.layer_state_manager.save_current_state()
+
     def deselect_all(self):
         """Deselect all strands"""
         self.selected_strand = None
         self.hovered_strand = None
         self.update()
 
-    # ==================== Save/Load Methods ====================
-
-    def get_project_data(self):
-        """
-        Get all project data as a dictionary for saving.
-
-        Returns:
-            dict: Project data including all strands
-        """
-        from attached_strand import AttachedStrand
-
-        # Separate strands into base strands and attached strands
-        # Base strands must be saved first (parents before children)
-        base_strands = []
-        attached_strands = []
-
-        for strand in self.strands:
-            if isinstance(strand, AttachedStrand):
-                attached_strands.append(strand)
-            else:
-                base_strands.append(strand)
-
-        # Sort attached strands by dependency order (parents before children)
-        attached_strands = self._sort_attached_strands(attached_strands)
-
-        # Build strands list
-        strands_data = []
-
-        # Add base strands first
-        for strand in base_strands:
-            data = strand.to_dict()
-            data['type'] = 'strand'
-            strands_data.append(data)
-
-        # Add attached strands in dependency order
-        for strand in attached_strands:
-            data = strand.to_dict()
-            # type is already set by AttachedStrand.to_dict()
-            strands_data.append(data)
-
-        return {
-            'version': '1.0',
-            'project_name': 'OpenStrandStudio Project',
-            'camera': {
-                'distance': self.camera_distance,
-                'azimuth': self.camera_azimuth,
-                'elevation': self.camera_elevation,
-                'target': self.camera_target.tolist()
-            },
-            'strands': strands_data
-        }
-
-    def _sort_attached_strands(self, attached_strands):
-        """
-        Sort attached strands so parents come before children.
-
-        This ensures proper reconstruction during load.
-        """
-        sorted_list = []
-        remaining = attached_strands.copy()
-
-        # Keep processing until all are sorted
-        max_iterations = len(remaining) * 2  # Safety limit
-        iterations = 0
-
-        while remaining and iterations < max_iterations:
-            iterations += 1
-            for strand in remaining[:]:
-                # Check if parent is already in sorted list or is a base strand
-                parent = strand.parent_strand
-                parent_is_sorted = (
-                    parent not in [s for s in attached_strands] or
-                    parent in sorted_list
-                )
-
-                if parent_is_sorted:
-                    sorted_list.append(strand)
-                    remaining.remove(strand)
-
-        # Add any remaining (shouldn't happen with valid data)
-        sorted_list.extend(remaining)
-
-        return sorted_list
-
-    def load_project_data(self, data):
-        """
-        Load project data from a dictionary.
-
-        Args:
-            data: dict with project data
-        """
-        from strand import Strand
-        from attached_strand import AttachedStrand
-
-        # Clear existing strands
-        self.strands.clear()
-        self.selected_strand = None
-        self.hovered_strand = None
-
-        # Load camera settings
-        if 'camera' in data:
-            cam = data['camera']
-            self.camera_distance = cam.get('distance', 10.0)
-            self.camera_azimuth = cam.get('azimuth', 45.0)
-            self.camera_elevation = cam.get('elevation', 30.0)
-            if 'target' in cam:
-                self.camera_target = np.array(cam['target'])
-
-        # Build lookup table as we load strands
-        strand_lookup = {}
-
-        # Load strands
-        for strand_data in data.get('strands', []):
-            strand_type = strand_data.get('type', 'strand')
-
-            if strand_type == 'strand':
-                # Load base strand
-                strand = Strand.from_dict(strand_data)
-                self.strands.append(strand)
-                strand_lookup[strand.name] = strand
-
-            elif strand_type == 'attached':
-                # Load attached strand
-                try:
-                    strand = AttachedStrand.from_dict(strand_data, strand_lookup)
-                    self.strands.append(strand)
-                    strand_lookup[strand.name] = strand
-                except ValueError as e:
-                    print(f"Warning: Could not load attached strand: {e}")
-
-        self.update()
-        print(f"Loaded {len(self.strands)} strands")
-
-    def clear_project(self):
-        """Clear all strands and reset the canvas"""
-        self.strands.clear()
-        self.selected_strand = None
-        self.hovered_strand = None
-        self.reset_camera()
-        self.update()
+    # Save/Load methods provided by CanvasSaveLoadMixin (canvas_save_load.py)
