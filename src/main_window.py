@@ -6,7 +6,7 @@ Contains the main application window with canvas and layer panel
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QToolBar, QAction, QStatusBar, QSplitter, QLabel,
-    QMessageBox, QActionGroup,
+    QMessageBox, QActionGroup, QPushButton,
     QDialog, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt
@@ -243,6 +243,13 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         self.action_strand_profile = QAction("Profile", self)
         self.action_strand_profile.triggered.connect(self._open_strand_profile_editor)
         toolbar.addAction(self.action_strand_profile)
+
+        toolbar.addSeparator()
+
+        # State Layer Manager debug button
+        self.action_state_viewer = QAction("State Layer Manager", self)
+        self.action_state_viewer.triggered.connect(self._show_state_layer_manager_dialog)
+        toolbar.addAction(self.action_state_viewer)
 
         toolbar.addSeparator()
 
@@ -954,6 +961,189 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
     # Save/Load/Points methods provided by mixins:
     # SaveProjectMixin (save_project.py), LoadProjectMixin (load_project.py),
     # LoadPointsMixin (load_points.py), ExportPointsMixin (export_points.py)
+
+    def _show_state_layer_manager_dialog(self):
+        """Show a dialog with all LayerStateManager state details."""
+        from PyQt5.QtWidgets import QTextEdit
+        from attached_strand import AttachedStrand
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("State Layer Manager - Full State View")
+        dlg.setMinimumSize(700, 600)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setStyleSheet(
+            "QTextEdit { background: #1e1e2e; color: #cdd6f4; "
+            "font-family: Consolas, monospace; font-size: 12px; }"
+        )
+        layout.addWidget(text_edit)
+
+        # Refresh button + close button
+        btn_layout = QHBoxLayout()
+        refresh_btn = QPushButton("Refresh")
+        close_btn = QPushButton("Close")
+        btn_layout.addWidget(refresh_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+        close_btn.clicked.connect(dlg.accept)
+
+        def build_report():
+            lines = []
+            lsm = self.layer_state_manager
+            canvas = self.canvas
+
+            lines.append("=" * 60)
+            lines.append("  STATE LAYER MANAGER - FULL REPORT")
+            lines.append("=" * 60)
+
+            # --- Overview ---
+            lines.append("")
+            lines.append("--- OVERVIEW ---")
+            total = len(canvas.strands) if canvas else 0
+            base_count = sum(1 for s in canvas.strands if not isinstance(s, AttachedStrand)) if canvas else 0
+            attached_count = total - base_count
+            lines.append(f"Total strands:      {total}")
+            lines.append(f"  Base strands:     {base_count}")
+            lines.append(f"  Attached strands: {attached_count}")
+            lines.append(f"Movement in progress: {lsm.movement_in_progress if lsm else 'N/A'}")
+
+            # --- Undo/Redo ---
+            lines.append("")
+            lines.append("--- UNDO / REDO ---")
+            urm = self.undo_redo_manager
+            if urm:
+                lines.append(f"Undo stack size:  {len(urm.undo_stack)}")
+                lines.append(f"Redo stack size:  {len(urm.redo_stack)}")
+                lines.append(f"Can undo:         {urm.can_undo()}")
+                lines.append(f"Can redo:         {urm.can_redo()}")
+                lines.append(f"Max history:      {urm.max_history}")
+                lines.append(f"Is restoring:     {urm._is_restoring}")
+            else:
+                lines.append("UndoRedoManager: not initialized")
+
+            if not lsm:
+                lines.append("\nLayerStateManager: not initialized")
+                return "\n".join(lines)
+
+            # Force a fresh state capture
+            lsm.save_current_state()
+            state = lsm.layer_state
+
+            # --- Order (set numbers) ---
+            lines.append("")
+            lines.append("--- ORDER (set numbers) ---")
+            order = state.get('order', [])
+            lines.append(f"Sets: {order if order else '(none)'}")
+
+            # --- Selected / Newest ---
+            lines.append("")
+            lines.append("--- SELECTION ---")
+            lines.append(f"Selected strand:  {state.get('selected_strand', 'None')}")
+            lines.append(f"Newest strand:    {state.get('newest_strand', 'None')}")
+            lines.append(f"Newest layer:     {state.get('newest_layer', 'None')}")
+
+            # --- Connections ---
+            lines.append("")
+            lines.append("--- CONNECTIONS ---")
+            connections = state.get('connections', {})
+            if connections:
+                max_name = max(len(n) for n in connections) if connections else 0
+                for name, conn in sorted(connections.items()):
+                    start_c = conn[0] if isinstance(conn, list) and len(conn) > 0 else '?'
+                    end_c = conn[1] if isinstance(conn, list) and len(conn) > 1 else '?'
+                    lines.append(f"  {name:<{max_name}}  start: {start_c:<15} end: {end_c}")
+            else:
+                lines.append("  (no connections)")
+
+            # --- Positions ---
+            lines.append("")
+            lines.append("--- POSITIONS ---")
+            positions = state.get('positions', {})
+            if positions:
+                for name, pos in sorted(positions.items()):
+                    if isinstance(pos, (list, tuple)) and len(pos) == 6:
+                        sx, sy, sz, ex, ey, ez = pos
+                        lines.append(
+                            f"  {name}  start:({sx:+.3f}, {sy:+.3f}, {sz:+.3f})  "
+                            f"end:({ex:+.3f}, {ey:+.3f}, {ez:+.3f})"
+                        )
+                    else:
+                        lines.append(f"  {name}  {pos}")
+            else:
+                lines.append("  (no positions)")
+
+            # --- Colors ---
+            lines.append("")
+            lines.append("--- COLORS ---")
+            colors = state.get('colors', {})
+            if colors:
+                for name, color in sorted(colors.items()):
+                    if isinstance(color, (list, tuple)) and len(color) >= 3:
+                        r, g, b = color[0], color[1], color[2]
+                        a = color[3] if len(color) > 3 else 1.0
+                        lines.append(f"  {name}  RGBA({r:.3f}, {g:.3f}, {b:.3f}, {a:.3f})")
+                    else:
+                        lines.append(f"  {name}  {color}")
+            else:
+                lines.append("  (no colors)")
+
+            # --- Per-Strand Details ---
+            lines.append("")
+            lines.append("--- PER-STRAND DETAILS ---")
+            if canvas and canvas.strands:
+                for strand in canvas.strands:
+                    is_attached = isinstance(strand, AttachedStrand)
+                    stype = "AttachedStrand" if is_attached else "Strand"
+                    lines.append(f"")
+                    lines.append(f"  [{strand.name}] ({stype})")
+                    lines.append(f"    visible:    {strand.visible}")
+                    lines.append(f"    width:      {strand.width:.4f}")
+                    lines.append(f"    height_r:   {strand.height_ratio:.4f}")
+                    lines.append(f"    shape:      {getattr(strand, 'cross_section_shape', 'ellipse')}")
+                    lines.append(f"    corner_r:   {getattr(strand, 'corner_radius', 0.0):.4f}")
+                    lines.append(f"    twist:      start={strand.start_twist:.1f}  end={strand.end_twist:.1f}  cp1={strand.cp1_twist:.1f}  cp2={strand.cp2_twist:.1f}")
+                    if is_attached:
+                        parent_name = strand.parent_strand.name if strand.parent_strand else "None"
+                        lines.append(f"    parent:     {parent_name}")
+                        lines.append(f"    attach_side: {strand.attachment_side}")
+                    children = [c.name for c in strand.attached_strands] if strand.attached_strands else []
+                    if children:
+                        lines.append(f"    children:   {children}")
+                    # Connection fields
+                    sc = strand.start_connection
+                    ec = strand.end_connection
+                    sc_str = f"{sc['strand'].name}({sc['end']})" if sc else "None"
+                    ec_str = f"{ec['strand'].name}({ec['end']})" if ec else "None"
+                    lines.append(f"    start_conn: {sc_str}")
+                    lines.append(f"    end_conn:   {ec_str}")
+            else:
+                lines.append("  (no strands)")
+
+            # --- Cached Connections (movement) ---
+            lines.append("")
+            lines.append("--- CACHED CONNECTIONS (movement) ---")
+            if lsm.cached_connections:
+                for name, conn in sorted(lsm.cached_connections.items()):
+                    lines.append(f"  {name}: {conn}")
+            else:
+                lines.append("  (none - no movement in progress)")
+
+            lines.append("")
+            lines.append("=" * 60)
+            return "\n".join(lines)
+
+        def refresh():
+            text_edit.setPlainText(build_report())
+
+        refresh_btn.clicked.connect(refresh)
+        refresh()  # Initial load
+
+        dlg.exec_()
 
     def _show_about_dialog(self):
         """Show the About dialog with version and credits"""

@@ -367,6 +367,16 @@ class AttachedStrand(Strand):
         attached.height_ratio = data.get('height_ratio', 0.4)
         attached.visible = data.get('visible', True)
 
+        # Restore cross-section properties
+        attached.cross_section_shape = data.get('cross_section_shape', 'ellipse')
+        attached.corner_radius = data.get('corner_radius', 0.0)
+
+        # Restore twist angles
+        attached.start_twist = data.get('start_twist', 0.0)
+        attached.end_twist = data.get('end_twist', 0.0)
+        attached.cp1_twist = data.get('cp1_twist', 0.0)
+        attached.cp2_twist = data.get('cp2_twist', 0.0)
+
         # Restore attachment state
         attached.start_attached = data.get('start_attached', True)
         attached.end_attached = data.get('end_attached', False)

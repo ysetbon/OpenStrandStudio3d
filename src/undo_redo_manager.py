@@ -247,6 +247,18 @@ class UndoRedoManager(QObject):
                     self.canvas.selected_strand = strand
                     break
 
+        # Invalidate rendering caches
+        if hasattr(self.canvas, '_clear_chain_root_cache'):
+            self.canvas._clear_chain_root_cache()
+
+        # Invalidate move mode caches
+        if hasattr(self.canvas, '_invalidate_cp_screen_cache'):
+            self.canvas._invalidate_cp_screen_cache()
+
+        # Sync layer state manager
+        if hasattr(self.canvas, 'layer_state_manager') and self.canvas.layer_state_manager:
+            self.canvas.layer_state_manager.save_current_state()
+
         # Update canvas display
         self.canvas.update()
 

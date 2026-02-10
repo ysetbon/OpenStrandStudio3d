@@ -147,6 +147,14 @@ class CanvasSaveLoadMixin:
         if self.layer_state_manager:
             self.layer_state_manager.save_current_state()
 
+        # Invalidate rendering caches
+        if hasattr(self, '_clear_chain_root_cache'):
+            self._clear_chain_root_cache()
+
+        # Invalidate move mode caches
+        if hasattr(self, '_invalidate_cp_screen_cache'):
+            self._invalidate_cp_screen_cache()
+
         self.update()
         print(f"Loaded {len(self.strands)} strands")
 
@@ -156,4 +164,9 @@ class CanvasSaveLoadMixin:
         self.selected_strand = None
         self.hovered_strand = None
         self.reset_camera()
+
+        # Invalidate rendering caches
+        if hasattr(self, '_clear_chain_root_cache'):
+            self._clear_chain_root_cache()
+
         self.update()
