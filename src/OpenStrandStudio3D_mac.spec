@@ -5,7 +5,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('box_stitch_3d.icns', '.'),
+        ('openstrandstudio3d_icon.icns', '.'),
     ],
     hiddenimports=['PyQt5', 'PyQt5.QtCore', 'PyQt5.QtGui', 'PyQt5.QtWidgets', 'PyQt5.QtOpenGL', 'PyQt5.QtSvg', 'OpenGL', 'OpenGL.GL', 'OpenGL.GLU', 'numpy'],
     hookspath=[],
@@ -33,7 +33,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='box_stitch_3d.icns',
+    icon='openstrandstudio3d_icon.icns',
 )
 
 coll = COLLECT(
@@ -49,7 +49,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='OpenStrandStudio3D.app',
-    icon='box_stitch_3d.icns',
+    icon='openstrandstudio3d_icon.icns',
     bundle_identifier='com.yonatan.openstrandstudio3d',
     info_plist={
         'CFBundleDisplayName': 'OpenStrandStudio 3D',
@@ -58,7 +58,7 @@ app = BUNDLE(
         'CFBundleShortVersionString': '1.01',
         'CFBundleVersion': '1.01',
         'CFBundleExecutable': 'OpenStrandStudio3D',
-        'CFBundleIconFile': 'box_stitch_3d.icns',
+        'CFBundleIconFile': 'openstrandstudio3d_icon.icns',
         'NSHighResolutionCapable': True,
         'NSRequiresAquaSystemAppearance': False,
         'LSMinimumSystemVersion': '10.13.0',

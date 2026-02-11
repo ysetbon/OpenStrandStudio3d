@@ -30,7 +30,7 @@ def main():
     app.setApplicationVersion("0.1.0")
 
     # Set application icon (works for window icon, taskbar, etc.)
-    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "box_stitch_3d.ico")
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "openstrandstudio3d_icon.ico")
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
 

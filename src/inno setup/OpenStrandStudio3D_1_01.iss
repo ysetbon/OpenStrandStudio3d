@@ -26,20 +26,20 @@ DiskSpanning=no
 MinVersion=6.1sp1
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-UninstallDisplayIcon={app}\box_stitch_3d.ico
-SetupIconFile={#SourcePath}\box_stitch_3d.ico
+UninstallDisplayIcon={app}\openstrandstudio3d_icon.ico
+SetupIconFile={#SourcePath}\openstrandstudio3d_icon.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 Source: "{#ExePath}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion solidbreak
-Source: "{#SourcePath}\box_stitch_3d.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\openstrandstudio3d_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\box_stitch_3d.ico"; MinVersion: 0,1
-Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\box_stitch_3d.ico"; Tasks: desktopicon
-Name: "{userprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\box_stitch_3d.ico"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\openstrandstudio3d_icon.ico"; MinVersion: 0,1
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\openstrandstudio3d_icon.ico"; Tasks: desktopicon
+Name: "{userprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\openstrandstudio3d_icon.ico"
 Name: "{userprograms}\{#MyAppName}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Tasks]
@@ -48,7 +48,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\.oss3d"; ValueType: string; ValueData: "OpenStrandStudio3DFile"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\Classes\OpenStrandStudio3DFile"; ValueType: string; ValueData: "OpenStrandStudio 3D Project"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\OpenStrandStudio3DFile\DefaultIcon"; ValueType: string; ValueData: "{app}\box_stitch_3d.ico"
+Root: HKCU; Subkey: "Software\Classes\OpenStrandStudio3DFile\DefaultIcon"; ValueType: string; ValueData: "{app}\openstrandstudio3d_icon.ico"
 Root: HKCU; Subkey: "Software\Classes\OpenStrandStudio3DFile\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 
 [UninstallDelete]

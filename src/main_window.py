@@ -1156,8 +1156,8 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         layout.setContentsMargins(30, 25, 30, 20)
         layout.setSpacing(8)
 
-        # Show the overhand knot icon
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "box_stitch_3d_256.png")
+        # Show the app icon
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "openstrandstudio3d_icon.png")
         if os.path.exists(icon_path):
             icon_label = QLabel()
             icon_label.setAlignment(Qt.AlignCenter)

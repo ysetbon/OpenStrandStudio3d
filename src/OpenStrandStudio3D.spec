@@ -26,7 +26,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=qt_binaries,
-    datas=[('box_stitch_3d.ico', '.')] + qt_datas,
+    datas=[('openstrandstudio3d_icon.ico', '.')] + qt_datas,
     hiddenimports=['PyQt5', 'PyQt5.QtCore', 'PyQt5.QtGui', 'PyQt5.QtWidgets', 'PyQt5.QtOpenGL', 'OpenGL', 'OpenGL.GL', 'OpenGL.GLU', 'numpy'],
     hookspath=[],
     hooksconfig={},
@@ -56,5 +56,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['box_stitch_3d.ico'],
+    icon=['openstrandstudio3d_icon.ico'],
 )

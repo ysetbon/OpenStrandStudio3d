@@ -43,7 +43,7 @@ cat > "$SCRIPTS_DIR/postinstall" << 'EOF'
 USER_HOME=$HOME
 
 # Create Desktop icon
-cp -f "/Applications/OpenStrandStudio 3D.app/Contents/Resources/box_stitch_3d.icns" "$USER_HOME/Desktop/OpenStrandStudio3D.icns"
+cp -f "/Applications/OpenStrandStudio 3D.app/Contents/Resources/openstrandstudio3d_icon.icns" "$USER_HOME/Desktop/OpenStrandStudio3D.icns"
 
 # Create Launch Agent for auto-start (optional)
 LAUNCH_AGENT_DIR="$USER_HOME/Library/LaunchAgents"
