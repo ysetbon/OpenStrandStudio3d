@@ -1365,6 +1365,28 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         btn_box.rejected.connect(dlg.reject)
         layout.addWidget(btn_box)
 
+        dialog_button_style = """
+            QPushButton {
+                background-color: #353538;
+                border: 1px solid #3E3E42;
+                border-radius: 4px;
+                padding: 4px 14px;
+                color: #E8E8E8;
+                min-width: 70px;
+            }
+            QPushButton:hover {
+                background-color: #454548;
+                border-color: #5A5A5D;
+            }
+            QPushButton:pressed {
+                background-color: #2A2A2D;
+            }
+        """
+        for role in (QDialogButtonBox.Ok, QDialogButtonBox.Cancel):
+            button = btn_box.button(role)
+            if button:
+                button.setStyleSheet(dialog_button_style)
+
         dlg.setStyleSheet("""
             QDialog {
                 background-color: #2D2D30;
@@ -1382,17 +1404,6 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
             QCheckBox::indicator:checked {
                 background-color: #7B68EE;
                 border-color: #7B68EE;
-            }
-            QPushButton {
-                background-color: #353538;
-                border: 1px solid #3E3E42;
-                border-radius: 4px;
-                padding: 6px 20px;
-                color: #E8E8E8;
-                min-width: 70px;
-            }
-            QPushButton:hover {
-                background-color: #454548;
             }
         """)
 
@@ -1479,23 +1490,33 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         ok_btn.accepted.connect(dlg.accept)
         layout.addWidget(ok_btn)
 
+        dialog_button_style = """
+            QPushButton {
+                background-color: #353538;
+                border: 1px solid #3E3E42;
+                border-radius: 4px;
+                padding: 4px 14px;
+                color: #E8E8E8;
+                min-width: 70px;
+            }
+            QPushButton:hover {
+                background-color: #454548;
+                border-color: #5A5A5D;
+            }
+            QPushButton:pressed {
+                background-color: #2A2A2D;
+            }
+        """
+        ok_button = ok_btn.button(QDialogButtonBox.Ok)
+        if ok_button:
+            ok_button.setStyleSheet(dialog_button_style)
+
         dlg.setStyleSheet("""
             QDialog {
                 background-color: #2D2D30;
             }
             QLabel a {
                 color: #7B68EE;
-            }
-            QPushButton {
-                background-color: #353538;
-                border: 1px solid #3E3E42;
-                border-radius: 4px;
-                padding: 6px 20px;
-                color: #E8E8E8;
-                min-width: 70px;
-            }
-            QPushButton:hover {
-                background-color: #454548;
             }
         """)
 
