@@ -3,15 +3,22 @@ OpenStrandStudio 3D - Main Window
 Contains the main application window with canvas and layer panel
 """
 
+import ctypes
+import sys
+
+if sys.platform.startswith("win"):
+    from ctypes import wintypes
+
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QToolBar, QAction, QStatusBar, QSplitter, QLabel,
     QMessageBox, QActionGroup, QPushButton,
-    QDialog, QDialogButtonBox
+    QDialog, QDialogButtonBox, QApplication
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QIcon, QPixmap
+from PyQt5.QtCore import Qt, QEvent, QPoint
+from PyQt5.QtGui import QPixmap
 
+from custom_title_bar import CustomTitleBar
 from strand_drawing_canvas import StrandDrawingCanvas
 from layer_panel import LayerPanel
 from undo_redo_manager import UndoRedoManager
@@ -22,14 +29,43 @@ from load_project import LoadProjectMixin
 from load_points import LoadPointsMixin
 from export_points import ExportPointsMixin
 
+if sys.platform.startswith("win"):
+    WM_NCHITTEST = 0x0084
+    HTCLIENT = 1
+    HTCAPTION = 2
+    HTLEFT = 10
+    HTRIGHT = 11
+    HTTOP = 12
+    HTTOPLEFT = 13
+    HTTOPRIGHT = 14
+    HTBOTTOM = 15
+    HTBOTTOMLEFT = 16
+    HTBOTTOMRIGHT = 17
+
 
 class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixin, ExportPointsMixin):
     """Main application window for OpenStrandStudio 3D"""
 
     def __init__(self):
         super().__init__()
+        self._use_custom_title_bar = sys.platform.startswith("win")
+        self._custom_title_bar = None
+        self._resize_border_thickness = 8
+
+        if self._use_custom_title_bar:
+            self.setWindowFlags(
+                Qt.Window |
+                Qt.FramelessWindowHint |
+                Qt.WindowSystemMenuHint |
+                Qt.WindowMinMaxButtonsHint |
+                Qt.WindowCloseButtonHint
+            )
+
         self.setWindowTitle("OpenStrandStudio 3D")
         self.setMinimumSize(900, 600)
+        app = QApplication.instance()
+        if app and not app.windowIcon().isNull():
+            self.setWindowIcon(app.windowIcon())
 
         # Initialize components
         self.canvas = None
@@ -41,10 +77,83 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         self._setup_undo_redo()
         self._setup_layer_state_manager()
         self._setup_toolbar()
+        self._setup_custom_title_bar()
         self._setup_statusbar()
         self._connect_signals()
         self._apply_dark_theme()
         self._load_user_settings()
+
+    def _setup_custom_title_bar(self):
+        """Install a custom title bar on Windows so title/icon can be larger."""
+        if not self._use_custom_title_bar:
+            return
+
+        self._custom_title_bar = CustomTitleBar(self)
+        self.setMenuWidget(self._custom_title_bar)
+        self._update_custom_title_bar_state()
+
+    def _update_custom_title_bar_state(self):
+        if self._custom_title_bar:
+            self._custom_title_bar.update_window_state(self.isMaximized())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_custom_title_bar_state()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange:
+            self._update_custom_title_bar_state()
+
+    def nativeEvent(self, eventType, message):
+        """Windows hit-test handling for frameless drag and resize."""
+        if not self._use_custom_title_bar:
+            return super().nativeEvent(eventType, message)
+
+        event_name = bytes(eventType)
+        if event_name != b"windows_generic_MSG":
+            return super().nativeEvent(eventType, message)
+
+        msg = wintypes.MSG.from_address(int(message))
+        if msg.message != WM_NCHITTEST:
+            return super().nativeEvent(eventType, message)
+
+        x_pos = ctypes.c_short(msg.lParam & 0xFFFF).value
+        y_pos = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+        global_pos = QPoint(x_pos, y_pos)
+
+        frame = self.frameGeometry()
+
+        # Let Windows resize the frameless window from edges/corners.
+        if not self.isMaximized():
+            border = self._resize_border_thickness
+            on_left = frame.left() <= x_pos < frame.left() + border
+            on_right = frame.right() - border < x_pos <= frame.right()
+            on_top = frame.top() <= y_pos < frame.top() + border
+            on_bottom = frame.bottom() - border < y_pos <= frame.bottom()
+
+            if on_top and on_left:
+                return True, HTTOPLEFT
+            if on_top and on_right:
+                return True, HTTOPRIGHT
+            if on_bottom and on_left:
+                return True, HTBOTTOMLEFT
+            if on_bottom and on_right:
+                return True, HTBOTTOMRIGHT
+            if on_left:
+                return True, HTLEFT
+            if on_right:
+                return True, HTRIGHT
+            if on_top:
+                return True, HTTOP
+            if on_bottom:
+                return True, HTBOTTOM
+
+        # Drag from the custom title bar (except window control buttons).
+        if self._custom_title_bar and self._custom_title_bar.is_drag_region(global_pos):
+            return True, HTCAPTION
+
+        return True, HTCLIENT
 
     def _setup_ui(self):
         """Setup the main UI layout"""
@@ -465,6 +574,41 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #252528;
+            }
+            #CustomTitleBar {
+                background-color: #2D2D30;
+                border-bottom: 1px solid #3E3E42;
+            }
+            #WindowTitleLabel {
+                color: #E8E8E8;
+                font-size: 15px;
+                font-weight: 600;
+            }
+            QToolButton#WindowControlButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+                color: #E8E8E8;
+            }
+            QToolButton#WindowControlButton:hover {
+                background-color: #454548;
+            }
+            QToolButton#WindowControlButton:pressed {
+                background-color: #2A2A2D;
+            }
+            QToolButton#WindowCloseButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+                color: #E8E8E8;
+            }
+            QToolButton#WindowCloseButton:hover {
+                background-color: #C42B1C;
+                color: #FFFFFF;
+            }
+            QToolButton#WindowCloseButton:pressed {
+                background-color: #A12316;
+                color: #FFFFFF;
             }
             QToolBar {
                 background-color: #2D2D30;
