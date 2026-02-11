@@ -61,6 +61,12 @@ class AttachedStrand(Strand):
         if self not in parent_strand.attached_strands:
             parent_strand.attached_strands.append(self)
 
+        # Mark parent's endpoint as occupied
+        parent_strand.has_circles[attachment_side] = True
+
+        # Our start is always occupied (connected to parent)
+        self.has_circles[0] = True
+
         # Align control point for C1 continuity with parent
         self._align_cp1_with_parent()
 

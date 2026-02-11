@@ -142,6 +142,8 @@ class LoadPointsMixin:
             for strand in created_strands:
                 self.layer_panel.add_strand(strand.name, color=strand.color)
 
+            self.layer_panel.update_layer_button_states(self.canvas)
+
             # Select the first created strand
             if created_strands:
                 self.canvas.selected_strand = created_strands[0]

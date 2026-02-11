@@ -53,6 +53,8 @@ class LoadProjectMixin:
             for strand in self.canvas.strands:
                 self.layer_panel.add_strand(strand.name, color=strand.color)
 
+            self.layer_panel.update_layer_button_states(self.canvas)
+
             # Update layer state manager with loaded strand relationships
             if self.layer_state_manager:
                 self.layer_state_manager.save_current_state()

@@ -74,6 +74,10 @@ class Strand:
         # Attached strands (children)
         self.attached_strands = []
 
+        # Track which ends have attached children (mirrors 2D has_circles concept)
+        # [0] = start end occupied, [1] = end end occupied
+        self.has_circles = [False, False]
+
         # Connection info (for LayerStateManager compatibility)
         self.start_connection = None  # {'strand': Strand, 'end': 'start'/'end'}
         self.end_connection = None
@@ -145,6 +149,21 @@ class Strand:
         """
         cls._defer_vbo_cleanup = False
         # VBOs are stale but will be rebuilt on next render - no need to explicitly clear
+
+    def update_has_circles(self):
+        """Recompute has_circles from attached_strands list."""
+        self.has_circles[0] = any(
+            getattr(child, 'attachment_side', None) == 0
+            for child in self.attached_strands
+        )
+        self.has_circles[1] = any(
+            getattr(child, 'attachment_side', None) == 1
+            for child in self.attached_strands
+        )
+
+    def is_deletable(self):
+        """A strand is deletable if not both ends are occupied by children."""
+        return not all(self.has_circles)
 
     def get_bezier_point(self, t):
         """

@@ -565,6 +565,7 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         self.layer_panel.strand_selected.connect(self.canvas.select_strand_by_name)
         self.layer_panel.strand_visibility_changed.connect(self.canvas.set_strand_visibility)
         self.layer_panel.strand_color_changed.connect(self.canvas.set_strand_color)
+        self.layer_panel.strand_delete_requested.connect(self._on_strand_delete_requested)
         self.layer_panel.set_duplicate_requested.connect(self._on_set_duplicate_requested)
         self.layer_panel.set_rotate_requested.connect(self._on_set_rotate_requested)
         self.layer_panel.deselect_all_requested.connect(self.canvas.deselect_all)
@@ -1012,6 +1013,7 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         strand = next((s for s in self.canvas.strands if s.name == strand_name), None)
         color = strand.color if strand else (0.667, 0.667, 1.0, 1.0)
         self.layer_panel.add_strand(strand_name, color=color)
+        self.layer_panel.update_layer_button_states(self.canvas)
         self.statusbar.showMessage(f"Created strand: {strand_name}", 3000)
 
         # Automatically switch to attach mode after creating a new strand
@@ -1021,6 +1023,14 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
     def _on_strand_deleted(self, strand_name: str):
         """Handle strand deletion"""
         self.layer_panel.remove_strand(strand_name)
+        self.layer_panel.update_layer_button_states(self.canvas)
+
+    def _on_strand_delete_requested(self, strand_name: str):
+        """Handle delete request from layer panel context menu."""
+        strand = next((s for s in self.canvas.strands if s.name == strand_name), None)
+        if strand and strand.is_deletable():
+            self.canvas.selected_strand = strand
+            self.canvas._delete_selected_strand()
 
     def _on_strand_selected(self, strand_name: str):
         """Handle strand selection"""
@@ -1040,6 +1050,7 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
             color = strand.color if strand else (0.667, 0.667, 1.0, 1.0)
             self.layer_panel.add_strand(name, color=color)
 
+        self.layer_panel.update_layer_button_states(self.canvas)
         self.statusbar.showMessage(
             f"Duplicated set {set_number} -> {new_set_number}",
             3000
@@ -1088,6 +1099,8 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         if self.canvas.selected_strand:
             self.layer_panel.select_strand(self.canvas.selected_strand.name)
 
+        self.layer_panel.update_layer_button_states(self.canvas)
+
         # Update layer state manager
         if self.layer_state_manager:
             self.layer_state_manager.save_current_state()
@@ -1101,6 +1114,8 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         # Update selection in layer panel
         if self.canvas.selected_strand:
             self.layer_panel.select_strand(self.canvas.selected_strand.name)
+
+        self.layer_panel.update_layer_button_states(self.canvas)
 
         # Update layer state manager
         if self.layer_state_manager:

@@ -1569,29 +1569,72 @@ class StrandDrawingCanvas(QOpenGLWidget, SelectModeMixin, MoveModeMixin, AttachM
 
         return new_set_number, new_names
 
+    def _get_all_descendants(self, strand):
+        """Recursively collect all attached descendants of a strand."""
+        descendants = []
+        for child in list(strand.attached_strands):
+            descendants.append(child)
+            descendants.extend(self._get_all_descendants(child))
+        return descendants
+
     def _delete_selected_strand(self):
-        """Delete the currently selected strand"""
-        if self.selected_strand:
-            # Save state for undo before deletion
-            if hasattr(self, 'undo_redo_manager') and self.undo_redo_manager:
-                self.undo_redo_manager.save_state()
+        """Delete the currently selected strand (with deletability check and proper cleanup)."""
+        if not self.selected_strand:
+            return
 
-            strand_name = self.selected_strand.name
+        strand = self.selected_strand
 
-            # Clean up saved control points if in straight mode
-            strand_id = id(self.selected_strand)
-            if strand_id in self.saved_control_points:
-                del self.saved_control_points[strand_id]
+        # Deletability guard: blocked if both ends have children
+        if not strand.is_deletable():
+            return
 
-            self.strands.remove(self.selected_strand)
-            self.selected_strand = None
+        # Save state for undo before deletion
+        if hasattr(self, 'undo_redo_manager') and self.undo_redo_manager:
+            self.undo_redo_manager.save_state()
 
-            self.strand_deleted.emit(strand_name)
-            self.strand_selected.emit("")
+        from attached_strand import AttachedStrand
 
-            # Update layer state manager after deletion
-            if hasattr(self, 'layer_state_manager') and self.layer_state_manager:
-                self.layer_state_manager.save_current_state()
+        # Collect all strands to remove (strand + all descendants)
+        strands_to_remove = [strand] + self._get_all_descendants(strand)
+
+        # If this is an AttachedStrand, clean up parent references
+        if isinstance(strand, AttachedStrand):
+            parent = strand.parent_strand
+            if parent:
+                # Remove from parent's attached_strands list
+                parent.attached_strands = [s for s in parent.attached_strands if s is not strand]
+                # Check if other children still occupy this side
+                side = strand.attachment_side
+                still_occupied = any(
+                    getattr(child, 'attachment_side', None) == side
+                    for child in parent.attached_strands
+                )
+                if not still_occupied:
+                    parent.has_circles[side] = False
+
+        # Remove all collected strands from canvas
+        deleted_names = []
+        for s in strands_to_remove:
+            if s in self.strands:
+                # Clean up saved control points
+                sid = id(s)
+                if sid in self.saved_control_points:
+                    del self.saved_control_points[sid]
+                self.strands.remove(s)
+                deleted_names.append(s.name)
+
+        self.selected_strand = None
+
+        # Emit deletion signals for each removed strand
+        for name in deleted_names:
+            self.strand_deleted.emit(name)
+        self.strand_selected.emit("")
+
+        # Update layer state manager after deletion
+        if hasattr(self, 'layer_state_manager') and self.layer_state_manager:
+            self.layer_state_manager.save_current_state()
+
+        self.update()
 
     def _project_point_to_screen(self, point_3d):
         """Project a 3D point to screen coordinates (x, y) in logical pixels, or None on failure."""

@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QWidgetAction, QSizePolicy, QDialogButtonBox, QAbstractSpinBox
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt5.QtGui import QColor, QPalette
+from PyQt5.QtGui import QColor, QPalette, QPainter, QPen, QBrush
 
 
 def _clamp_channel(value):
@@ -298,6 +298,7 @@ class LayerButton(QPushButton):
         self.strand_color = color
         self.is_visible = True
         self.is_selected = False
+        self._deletable = True  # Whether this strand can be deleted
 
         self._setup_ui()
 
@@ -374,6 +375,34 @@ class LayerButton(QPushButton):
         self._update_style()
         self.color_changed.emit(self.strand_name, color)
 
+    def set_deletable(self, deletable: bool):
+        """Set whether this strand can be deleted, triggers repaint for purple dot."""
+        if self._deletable != deletable:
+            self._deletable = deletable
+            self.update()
+
+    def paintEvent(self, event):
+        """Custom paint to draw purple dot indicator when strand is deletable."""
+        super().paintEvent(event)
+
+        if self._deletable:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+
+            rect = self.rect()
+            dot_radius = 5
+            # Position: centered vertically, 8px from right edge
+            cx = rect.width() - 8
+            cy = rect.height() // 2
+
+            # Dark border
+            painter.setPen(QPen(QColor(30, 30, 30), 1.5))
+            painter.setBrush(QBrush(QColor("#7B68EE")))
+            painter.drawEllipse(cx - dot_radius, cy - dot_radius,
+                                dot_radius * 2, dot_radius * 2)
+
+            painter.end()
+
     def _show_context_menu(self, pos):
         """Show right-click context menu with hover effects"""
         menu = QMenu(self)
@@ -408,10 +437,14 @@ class LayerButton(QPushButton):
 
         menu.addSeparator()
 
-        # Delete - with hover label
+        # Delete - with hover label (disabled when not deletable)
         delete_label = HoverLabel("Delete", self)
+        if not self._deletable:
+            delete_label.setEnabled(False)
+            delete_label.setStyleSheet(delete_label.styleSheet() + "color: #666666;")
         delete_action = QWidgetAction(self)
         delete_action.setDefaultWidget(delete_label)
+        delete_action.setEnabled(self._deletable)
         delete_action.triggered.connect(self._request_delete)
         menu.addAction(delete_action)
 
@@ -640,9 +673,16 @@ class LayerButton(QPushButton):
                 break
 
     def _request_delete(self):
-        """Request deletion of this strand"""
-        # This would be connected to parent for actual deletion
-        pass
+        """Request deletion of this strand via LayerPanel signal."""
+        if not self._deletable:
+            return
+        # Walk up to find the LayerPanel and emit its signal
+        parent = self.parent()
+        while parent:
+            if isinstance(parent, LayerPanel):
+                parent.strand_delete_requested.emit(self.strand_name)
+                return
+            parent = parent.parent()
 
 
 class LayerPanel(QWidget):
@@ -759,6 +799,12 @@ class LayerPanel(QWidget):
         self.btn_new_strand.setStyleSheet(TOOLBAR_BUTTON_STYLE)
         buttons_layout2.addWidget(self.btn_new_strand)
 
+        self.btn_delete_strand = QPushButton("Delete")
+        self.btn_delete_strand.clicked.connect(self._request_delete_selected)
+        self.btn_delete_strand.setStyleSheet(TOOLBAR_BUTTON_STYLE)
+        self.btn_delete_strand.setEnabled(False)
+        buttons_layout2.addWidget(self.btn_delete_strand)
+
         layout.addLayout(buttons_layout2)
 
         # Apply dark theme (no default button style - each button has its own)
@@ -864,6 +910,9 @@ class LayerPanel(QWidget):
         self.selected_strand = name
         if name and name in self.layer_buttons:
             self.layer_buttons[name].set_selected(True)
+            self.btn_delete_strand.setEnabled(self.layer_buttons[name]._deletable)
+        else:
+            self.btn_delete_strand.setEnabled(False)
 
     def _on_button_clicked(self, name: str):
         """Handle layer button click"""
@@ -874,12 +923,18 @@ class LayerPanel(QWidget):
         """Request to enter add strand mode"""
         self.add_strand_requested.emit()
 
+    def _request_delete_selected(self):
+        """Delete the currently selected strand via the toolbar button."""
+        if self.selected_strand:
+            self.strand_delete_requested.emit(self.selected_strand)
+
     def _deselect_all(self):
         """Deselect all strands in panel and canvas"""
         # Deselect in panel
         if self.selected_strand and self.selected_strand in self.layer_buttons:
             self.layer_buttons[self.selected_strand].set_selected(False)
         self.selected_strand = None
+        self.btn_delete_strand.setEnabled(False)
 
         # Emit signal to deselect in canvas
         self.deselect_all_requested.emit()
@@ -975,3 +1030,23 @@ class LayerPanel(QWidget):
     def get_strand_count(self):
         """Get number of strands"""
         return len(self.layer_buttons)
+
+    def is_strand_deletable(self, strand):
+        """Check if a strand can be deleted (not both ends occupied by children)."""
+        return strand.is_deletable()
+
+    def update_layer_button_states(self, canvas):
+        """Update deletable state of all layer buttons based on strand data."""
+        strand_map = {s.name: s for s in canvas.strands}
+        for name, button in self.layer_buttons.items():
+            strand = strand_map.get(name)
+            if strand:
+                button.set_deletable(strand.is_deletable())
+            else:
+                button.set_deletable(False)
+
+        # Update toolbar delete button for current selection
+        if self.selected_strand and self.selected_strand in self.layer_buttons:
+            self.btn_delete_strand.setEnabled(self.layer_buttons[self.selected_strand]._deletable)
+        else:
+            self.btn_delete_strand.setEnabled(False)
