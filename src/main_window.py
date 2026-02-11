@@ -818,10 +818,27 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         self.action_edit_all.setChecked(edit_all)
         self.canvas.set_move_edit_all(edit_all)
 
-        # Load toolbar visibility setting - hide move/attach toolbars unless always-show is on
+        # Load toolbar visibility and layout
         always_show = settings.get('always_show_move_attach_toolbars', False)
+        self._apply_toolbar_layout(always_show)
+        # Apply initial visibility (no mode active yet → view)
         self.move_toolbar.setVisible(always_show)
         self.attach_toolbar.setVisible(always_show)
+
+    def _apply_toolbar_layout(self, always_show):
+        """Insert or remove toolbar breaks depending on the always-show setting.
+
+        always_show ON  → Move on row 1, Attach on row 2, Stretch/Rotate on row 3
+        always_show OFF → all four share a single row (only one visible at a time)
+        """
+        if always_show:
+            # Put attach and stretch on their own rows
+            self.insertToolBarBreak(self.attach_toolbar)
+            self.insertToolBarBreak(self.stretch_toolbar)
+        else:
+            # Collapse all onto the same row
+            self.removeToolBarBreak(self.attach_toolbar)
+            self.removeToolBarBreak(self.stretch_toolbar)
 
     def _set_mode(self, mode: str):
         """Set the current interaction mode"""
@@ -1383,7 +1400,8 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
             always_show = cb_always_show.isChecked()
             settings.set_and_save('always_show_move_attach_toolbars', always_show)
 
-            # Apply immediately: update toolbar visibility for current mode
+            # Apply layout (separate rows vs single row) and visibility
+            self._apply_toolbar_layout(always_show)
             current_mode = getattr(self.canvas, 'current_mode', 'view')
             self.move_toolbar.setVisible(current_mode == "move" or always_show)
             self.attach_toolbar.setVisible(current_mode == "attach" or always_show)

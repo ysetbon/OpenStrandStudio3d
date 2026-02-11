@@ -6,5 +6,6 @@
   "show_grid": true,
   "show_axes": true,
   "link_control_points": false,
-  "move_edit_all": true
+  "move_edit_all": true,
+  "always_show_move_attach_toolbars": false
 }
