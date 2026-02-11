@@ -29,6 +29,9 @@ class UserSettings:
         # Move mode settings
         'link_control_points': False,
         'move_edit_all': False,
+
+        # Toolbar visibility
+        'always_show_move_attach_toolbars': False,
     }
 
     def __init__(self):

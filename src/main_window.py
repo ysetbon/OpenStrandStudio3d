@@ -12,7 +12,7 @@ if sys.platform.startswith("win"):
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QToolBar, QAction, QStatusBar, QSplitter, QLabel,
-    QMessageBox, QActionGroup, QPushButton,
+    QMessageBox, QActionGroup, QPushButton, QCheckBox,
     QDialog, QDialogButtonBox, QApplication
 )
 from PyQt5.QtCore import Qt, QEvent, QPoint
@@ -362,6 +362,11 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
 
         toolbar.addSeparator()
 
+        # Settings button
+        self.action_settings = QAction("Settings", self)
+        self.action_settings.triggered.connect(self._show_settings_dialog)
+        toolbar.addAction(self.action_settings)
+
         # About button
         self.action_about = QAction("About", self)
         self.action_about.triggered.connect(self._show_about_dialog)
@@ -384,7 +389,7 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         self._last_load_strand_length = 0.5
         self._original_segment_lengths = []  # per-strand original lengths from loaded points
 
-        # === Move mode options toolbar (new line) ===
+        # === Mode-specific toolbars (all on the same row to avoid layout pop) ===
         self.addToolBarBreak()
         self.move_toolbar = QToolBar("Move Options")
         self.move_toolbar.setMovable(False)
@@ -434,8 +439,7 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         self.action_edit_all.triggered.connect(self._toggle_edit_all)
         self.move_toolbar.addAction(self.action_edit_all)
 
-        # === Attach mode options toolbar (new line) ===
-        self.addToolBarBreak()
+        # === Attach mode options toolbar (same row) ===
         self.attach_toolbar = QToolBar("Attach Options")
         self.attach_toolbar.setMovable(False)
         self.addToolBar(self.attach_toolbar)
@@ -468,8 +472,7 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         self.attach_mode_group.addAction(self.action_attach_along)
         self.attach_toolbar.addAction(self.action_attach_along)
 
-        # === Stretch mode options toolbar (new line) ===
-        self.addToolBarBreak()
+        # === Stretch mode options toolbar (same row) ===
         self.stretch_toolbar = QToolBar("Stretch Options")
         self.stretch_toolbar.setMovable(False)
         self.addToolBar(self.stretch_toolbar)
@@ -506,8 +509,7 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         # Initially hide the stretch toolbar (only show when in stretch mode)
         self.stretch_toolbar.setVisible(False)
 
-        # === Rotate mode options toolbar (new line) ===
-        self.addToolBarBreak()
+        # === Rotate mode options toolbar (same row) ===
         self.rotate_toolbar = QToolBar("Rotate Options")
         self.rotate_toolbar.setMovable(False)
         self.addToolBar(self.rotate_toolbar)
@@ -816,6 +818,11 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         self.action_edit_all.setChecked(edit_all)
         self.canvas.set_move_edit_all(edit_all)
 
+        # Load toolbar visibility setting - hide move/attach toolbars unless always-show is on
+        always_show = settings.get('always_show_move_attach_toolbars', False)
+        self.move_toolbar.setVisible(always_show)
+        self.attach_toolbar.setVisible(always_show)
+
     def _set_mode(self, mode: str):
         """Set the current interaction mode"""
         # Update action states
@@ -837,11 +844,16 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         elif mode == "rotate":
             self.action_rotate.setChecked(True)
 
-        # Show/hide stretch toolbar based on mode
-        self.stretch_toolbar.setVisible(mode == "stretch")
+        # Freeze repaints so all toolbar show/hide happens in one frame (no flicker)
+        self.setUpdatesEnabled(False)
 
-        # Show/hide rotate toolbar based on mode
+        always_show = get_settings().get('always_show_move_attach_toolbars', False)
+        self.move_toolbar.setVisible(mode == "move" or always_show)
+        self.attach_toolbar.setVisible(mode == "attach" or always_show)
+        self.stretch_toolbar.setVisible(mode == "stretch")
         self.rotate_toolbar.setVisible(mode == "rotate")
+
+        self.setUpdatesEnabled(True)
 
         self.canvas.set_mode(mode)
 
@@ -1288,6 +1300,93 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         refresh()  # Initial load
 
         dlg.exec_()
+
+    def _show_settings_dialog(self):
+        """Show the Settings dialog"""
+        settings = get_settings()
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Settings")
+        dlg.setFixedWidth(400)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(20, 20, 20, 15)
+        layout.setSpacing(12)
+
+        title = QLabel("Settings")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #7B68EE;")
+        layout.addWidget(title)
+
+        layout.addSpacing(4)
+
+        # --- Toolbar visibility section ---
+        section_label = QLabel("Toolbar Visibility")
+        section_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #C0C0C0;")
+        layout.addWidget(section_label)
+
+        cb_always_show = QCheckBox("Always show Move / Attach toolbars")
+        cb_always_show.setChecked(settings.get('always_show_move_attach_toolbars', False))
+        cb_always_show.setStyleSheet("color: #E8E8E8; font-size: 12px;")
+        cb_always_show.setToolTip(
+            "When OFF, the Move and Attach option bars only appear\n"
+            "when you activate Move or Attach mode.\n"
+            "When ON, they are always visible in the main window."
+        )
+        layout.addWidget(cb_always_show)
+
+        hint = QLabel(
+            "When off, the Move/Attach option bars (XZ, Y, Depth, Along)\n"
+            "only appear when you click the Move or Attach button."
+        )
+        hint.setStyleSheet("color: #808080; font-size: 11px;")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        layout.addStretch()
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(dlg.accept)
+        btn_box.rejected.connect(dlg.reject)
+        layout.addWidget(btn_box)
+
+        dlg.setStyleSheet("""
+            QDialog {
+                background-color: #2D2D30;
+            }
+            QCheckBox {
+                spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #5A5A5D;
+                border-radius: 3px;
+                background-color: #353538;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #7B68EE;
+                border-color: #7B68EE;
+            }
+            QPushButton {
+                background-color: #353538;
+                border: 1px solid #3E3E42;
+                border-radius: 4px;
+                padding: 6px 20px;
+                color: #E8E8E8;
+                min-width: 70px;
+            }
+            QPushButton:hover {
+                background-color: #454548;
+            }
+        """)
+
+        if dlg.exec_() == QDialog.Accepted:
+            always_show = cb_always_show.isChecked()
+            settings.set_and_save('always_show_move_attach_toolbars', always_show)
+
+            # Apply immediately: update toolbar visibility for current mode
+            current_mode = getattr(self.canvas, 'current_mode', 'view')
+            self.move_toolbar.setVisible(current_mode == "move" or always_show)
+            self.attach_toolbar.setVisible(current_mode == "attach" or always_show)
 
     def _show_about_dialog(self):
         """Show the About dialog with version and credits"""
