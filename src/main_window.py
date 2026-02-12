@@ -569,7 +569,7 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         self.layer_panel.set_duplicate_requested.connect(self._on_set_duplicate_requested)
         self.layer_panel.set_rotate_requested.connect(self._on_set_rotate_requested)
         self.layer_panel.deselect_all_requested.connect(self.canvas.deselect_all)
-        self.layer_panel.add_strand_requested.connect(lambda: self._set_mode("add_strand"))
+        self.layer_panel.add_strand_requested.connect(self._enter_add_strand_mode)
         self.layer_panel.draw_names_requested.connect(self.canvas.toggle_name_drawing)
 
     def _apply_dark_theme(self):
@@ -1007,6 +1007,12 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         """Handle camera change updates"""
         self.camera_label.setText(f"Camera: {info}")
 
+    def _enter_add_strand_mode(self):
+        """Save current mode and enter add_strand mode without hiding toolbars."""
+        self._mode_before_add_strand = self.canvas.current_mode
+        # Only change the canvas mode — keep toolbars as they are
+        self.canvas.set_mode("add_strand")
+
     def _on_strand_created(self, strand_name: str):
         """Handle new strand creation"""
         # Find the strand to get its actual color
@@ -1016,9 +1022,13 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         self.layer_panel.update_layer_button_states(self.canvas)
         self.statusbar.showMessage(f"Created strand: {strand_name}", 3000)
 
-        # Automatically switch to attach mode after creating a new strand
-        # This follows the pattern from OpenStrand 106
-        self._set_mode("attach")
+        # Restore the mode only if we came from the "New" button (add_strand mode).
+        # Otherwise (e.g. attach mode created a strand), keep the current mode.
+        prev = getattr(self, '_mode_before_add_strand', None)
+        if prev is not None:
+            self._mode_before_add_strand = None
+            # Only change the canvas mode — toolbars were never hidden
+            self.canvas.set_mode(prev)
 
     def _on_strand_deleted(self, strand_name: str):
         """Handle strand deletion"""

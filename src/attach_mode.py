@@ -50,7 +50,7 @@ class AttachModeMixin:
                 if is_start_hovered:
                     color = (1.0, 1.0, 0.0, 0.8)  # Yellow when hovered
                 else:
-                    color = (0.0, 1.0, 0.5, 0.5)  # Green semi-transparent
+                    color = (0.0, 0.5, 1.0, 0.5)  # Blue semi-transparent
 
                 self._draw_attachment_sphere(strand.start, color)
 

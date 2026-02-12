@@ -781,7 +781,7 @@ class LayerPanel(QWidget):
         layout.addWidget(scroll)
 
         # Bottom buttons
-        buttons_layout2 = QHBoxLayout()
+        buttons_layout2 = QVBoxLayout()
 
         self.btn_draw_names = QPushButton("Names")
         self.btn_draw_names.setCheckable(True)
