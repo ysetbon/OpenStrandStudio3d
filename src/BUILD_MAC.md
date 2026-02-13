@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-1. Install Python 3.9+ from [python.org](https://www.python.org/downloads/)
+1. Install Python 3.9 to 3.13 from [python.org](https://www.python.org/downloads/) (**not** 3.14 — PyQt5 crashes on Python 3.14 due to internal dict API changes)
 2. Xcode Command Line Tools: `xcode-select --install`
 
 ## Steps
@@ -10,7 +10,7 @@
 ### 1. Install dependencies and build the .app bundle
 
 ```
-cd src && pip install -r requirements.txt pyinstaller && pyinstaller OpenStrandStudio3D_mac.spec
+cd src && pip3 install -r requirements.txt pyinstaller && pyinstaller OpenStrandStudio3D_mac.spec
 ```
 
 This produces `src/dist/OpenStrandStudio3D.app`.

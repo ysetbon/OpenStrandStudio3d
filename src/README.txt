@@ -48,8 +48,8 @@ Windows:
   See BUILD_WINDOWS.md for full instructions.
 
 macOS:
-  1. Install Python 3.9+ and Xcode Command Line Tools
-  2. Install dependencies: pip install -r requirements.txt pyinstaller
+  1. Install Python 3.9 to 3.13 and Xcode Command Line Tools (not 3.14 - PyQt5 incompatible)
+  2. Install dependencies: pip3 install -r requirements.txt pyinstaller
   3. Build app: pyinstaller OpenStrandStudio3D_mac.spec
   4. Build installer: bash build_installer_3d_1_00.sh
 

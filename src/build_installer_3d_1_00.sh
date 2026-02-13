@@ -33,7 +33,7 @@ SCRIPTS_DIR="$WORKING_DIR/scripts"
 RESOURCES_DIR="$WORKING_DIR/resources"
 PKG_PATH="/Users/yonatan/Documents/GitHub/OpenStrandStudio3d/src/installer_output/${APP_NAME}_${VERSION}.pkg"
 
-mkdir -p "$SCRIPTS_DIR" "$RESOURCES_DIR"
+mkdir -p "$SCRIPTS_DIR" "$RESOURCES_DIR" "$(dirname "$PKG_PATH")"
 
 # Create postinstall script
 cat > "$SCRIPTS_DIR/postinstall" << 'EOF'
