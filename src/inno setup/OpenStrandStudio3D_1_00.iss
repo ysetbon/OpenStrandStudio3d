@@ -1,8 +1,9 @@
-#define MyAppName "OpenStrandStudio 3D"
-#define MyAppVersion "1.01"
+#define MyAppName "OpenStrand Studio 3D"
+#define MyAppVersion "1.00"
 #define MyAppPublisher "Yonatan Setbon"
 #define MyAppExeName "OpenStrandStudio3D.exe"
 #define MyAppDate "13_Feb_2026"
+#define MyAppIconIcoName "openstrandstudio3d_icon_gray.ico"
 #define SourcePath "C:\Users\YonatanSetbon\.vscode\OpenStrandStudio3d\src"
 #define ExePath "C:\Users\YonatanSetbon\.vscode\OpenStrandStudio3d\src\dist"
 
@@ -14,7 +15,7 @@ AppContact=ysetbon@gmail.com
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir=C:\Users\YonatanSetbon\.vscode\OpenStrandStudio3d\src\dist
-OutputBaseFilename=OpenStrandStudio3DSetup_{#MyAppDate}_1_01
+OutputBaseFilename=OpenStrandStudio3DSetup_{#MyAppDate}_1_00
 Compression=lzma2/ultra64
 InternalCompressLevel=max
 CompressionThreads=auto
@@ -26,20 +27,21 @@ DiskSpanning=no
 MinVersion=6.1sp1
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-UninstallDisplayIcon={app}\openstrandstudio3d_icon.ico
-SetupIconFile={#SourcePath}\openstrandstudio3d_icon.ico
+UninstallDisplayIcon={app}\{#MyAppIconIcoName}
+SetupIconFile={#SourcePath}\{#MyAppIconIcoName}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 Source: "{#ExePath}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion solidbreak
-Source: "{#SourcePath}\openstrandstudio3d_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\{#MyAppIconIcoName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\openstrandstudio3d_icon.png"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\openstrandstudio3d_icon.ico"; MinVersion: 0,1
-Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\openstrandstudio3d_icon.ico"; Tasks: desktopicon
-Name: "{userprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\openstrandstudio3d_icon.ico"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppIconIcoName}"; MinVersion: 0,1
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppIconIcoName}"; Tasks: desktopicon
+Name: "{userprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppIconIcoName}"
 Name: "{userprograms}\{#MyAppName}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Tasks]
@@ -48,7 +50,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\.oss3d"; ValueType: string; ValueData: "OpenStrandStudio3DFile"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\Classes\OpenStrandStudio3DFile"; ValueType: string; ValueData: "OpenStrandStudio 3D Project"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\OpenStrandStudio3DFile\DefaultIcon"; ValueType: string; ValueData: "{app}\openstrandstudio3d_icon.ico"
+Root: HKCU; Subkey: "Software\Classes\OpenStrandStudio3DFile\DefaultIcon"; ValueType: string; ValueData: "{app}\{#MyAppIconIcoName}"
 Root: HKCU; Subkey: "Software\Classes\OpenStrandStudio3DFile\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 
 [UninstallDelete]

@@ -27,13 +27,14 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("OpenStrandStudio 3D")
-    app.setApplicationVersion("0.1.0")
+    app.setApplicationVersion("1.0.0")
 
     # Set application icon (prefer high-resolution sources first).
     icon_base_dir = os.path.dirname(os.path.abspath(__file__))
     icon_candidates = [
         "openstrandstudio3d_icon.png",   # High-res source, best for custom title bar rendering
         "openstrandstudio3d_icon.icns",  # Useful fallback when PNG is missing
+        "openstrandstudio3d_icon_gray.ico",
         "openstrandstudio3d_icon.ico",
     ]
     for icon_name in icon_candidates:

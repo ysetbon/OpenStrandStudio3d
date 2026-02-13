@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# OpenStrandStudio 3D macOS PKG Installer Builder - Version 1.01
+# OpenStrandStudio 3D macOS PKG Installer Builder - Version 1.00
 # Date: Created February 13, 2026
 #
 # LOGIC EXPLANATION:
@@ -21,8 +21,8 @@
 ################################################################################
 
 # Set variables
-APP_NAME="OpenStrandStudio3D"
-VERSION="1.01"
+APP_NAME="OpenStrand Studio 3D"
+VERSION="1.00"
 APP_DATE="13_February_2026"
 PUBLISHER="Yonatan Setbon"
 IDENTIFIER="com.yonatan.openstrandstudio3d"
@@ -102,7 +102,7 @@ cat > "$RESOURCES_DIR/welcome.html" << 'EOF'
     <meta charset="UTF-8">
 </head>
 <body>
-    <h2>Welcome to OpenStrandStudio 3D 1.01</h2>
+    <h2>Welcome to OpenStrandStudio 3D 1.00</h2>
     <p>This will install OpenStrandStudio 3D on your computer. You will be guided through the steps necessary to install this software.</p>
     <p>OpenStrandStudio 3D is a 3D strand/braid design application using OpenGL.</p>
     <p>The program is brought to you by Yonatan Setbon. You can contact me at ysetbon@gmail.com.</p>

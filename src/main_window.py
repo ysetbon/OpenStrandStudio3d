@@ -1467,7 +1467,7 @@ class MainWindow(QMainWindow, SaveProjectMixin, LoadProjectMixin, LoadPointsMixi
         title.setStyleSheet("font-size: 22px; font-weight: bold; color: #7B68EE;")
         layout.addWidget(title)
 
-        version_label = QLabel("Version 1.01")
+        version_label = QLabel("Version 1.00")
         version_label.setAlignment(Qt.AlignCenter)
         version_label.setStyleSheet("font-size: 15px; color: #C0C0C0;")
         layout.addWidget(version_label)

@@ -26,7 +26,7 @@ Verify the app launches correctly.
 ### 3. Build the PKG installer
 
 ```
-cd src && bash build_installer_3d_1_01.sh
+cd src && bash build_installer_3d_1_00.sh
 ```
 
 This produces the `.pkg` installer in `src/installer_output/`.
