@@ -5,6 +5,7 @@ Handles saving and loading user preferences
 
 import json
 import os
+import sys
 from pathlib import Path
 
 
@@ -41,21 +42,22 @@ class UserSettings:
 
     def _get_settings_path(self):
         """Get the path to the settings file"""
-        # Try to use the app directory first, fall back to home directory
+        # When running as a PyInstaller bundle, always use home directory
+        # (the app directory is a temporary extraction path that gets deleted)
+        if getattr(sys, 'frozen', False):
+            return Path.home() / self.SETTINGS_FILENAME
+
+        # In development, try app directory first, fall back to home
         app_dir = Path(__file__).parent
         app_settings = app_dir / self.SETTINGS_FILENAME
 
-        # Use app directory if writable, otherwise use home
         try:
-            # Test if we can write to app directory
             test_file = app_dir / ".write_test"
             test_file.touch()
             test_file.unlink()
             return app_settings
         except (PermissionError, OSError):
-            # Fall back to home directory
-            home = Path.home()
-            return home / self.SETTINGS_FILENAME
+            return Path.home() / self.SETTINGS_FILENAME
 
     def load(self):
         """Load settings from file"""
