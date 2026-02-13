@@ -5,7 +5,8 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('openstrandstudio3d_icon.icns', '.'),
+        ('openstrandstudio3d_icon_gray.icns', '.'),
+        ('openstrandstudio3d_icon.png', '.'),
     ],
     hiddenimports=['PyQt5', 'PyQt5.QtCore', 'PyQt5.QtGui', 'PyQt5.QtWidgets', 'PyQt5.QtOpenGL', 'PyQt5.QtSvg', 'OpenGL', 'OpenGL.GL', 'OpenGL.GLU', 'numpy'],
     hookspath=[],
@@ -33,7 +34,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='openstrandstudio3d_icon.icns',
+    icon='openstrandstudio3d_icon_gray.icns',
 )
 
 coll = COLLECT(
@@ -49,7 +50,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='OpenStrandStudio3D.app',
-    icon='openstrandstudio3d_icon.icns',
+    icon='openstrandstudio3d_icon_gray.icns',
     bundle_identifier='com.yonatan.openstrandstudio3d',
     info_plist={
         'CFBundleDisplayName': 'OpenStrandStudio 3D',
@@ -58,7 +59,7 @@ app = BUNDLE(
         'CFBundleShortVersionString': '1.00',
         'CFBundleVersion': '1.00',
         'CFBundleExecutable': 'OpenStrandStudio3D',
-        'CFBundleIconFile': 'openstrandstudio3d_icon.icns',
+        'CFBundleIconFile': 'openstrandstudio3d_icon_gray.icns',
         'NSHighResolutionCapable': True,
         'NSRequiresAquaSystemAppearance': False,
         'LSMinimumSystemVersion': '10.13.0',

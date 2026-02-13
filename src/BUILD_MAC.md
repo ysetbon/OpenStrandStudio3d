@@ -10,7 +10,7 @@
 ### 1. Install dependencies and build the .app bundle
 
 ```
-cd src && pip3 install -r requirements.txt pyinstaller && pyinstaller OpenStrandStudio3D_mac.spec
+cd src && pip3 install -r requirements.txt pyinstaller pillow && python3 generate_mac_icon.py && pyinstaller OpenStrandStudio3D_mac.spec
 ```
 
 This produces `src/dist/OpenStrandStudio3D.app`.
