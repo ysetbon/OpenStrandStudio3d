@@ -29,14 +29,22 @@ def main():
     app.setApplicationName("OpenStrandStudio 3D")
     app.setApplicationVersion("1.0.0")
 
-    # Set application icon (prefer high-resolution sources first).
+    # Set application icon.
+    # Windows: color PNG for the custom title bar rendering.
+    # macOS: gray icon to match the Dock/taskbar (no custom title bar on mac).
     icon_base_dir = os.path.dirname(os.path.abspath(__file__))
-    icon_candidates = [
-        "openstrandstudio3d_icon.png",   # High-res source, best for custom title bar rendering
-        "openstrandstudio3d_icon.icns",  # Useful fallback when PNG is missing
-        "openstrandstudio3d_icon_gray.ico",
-        "openstrandstudio3d_icon.ico",
-    ]
+    if sys.platform == "darwin":
+        icon_candidates = [
+            "openstrandstudio3d_icon_gray.icns",
+            "openstrandstudio3d_icon.icns",
+            "openstrandstudio3d_icon.png",
+        ]
+    else:
+        icon_candidates = [
+            "openstrandstudio3d_icon.png",
+            "openstrandstudio3d_icon_gray.ico",
+            "openstrandstudio3d_icon.ico",
+        ]
     for icon_name in icon_candidates:
         icon_path = os.path.join(icon_base_dir, icon_name)
         if os.path.exists(icon_path):
