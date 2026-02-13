@@ -2,7 +2,7 @@
 
 ################################################################################
 # OpenStrandStudio 3D macOS PKG Installer Builder - Version 1.01
-# Date: Created February 9, 2026
+# Date: Created February 13, 2026
 #
 # LOGIC EXPLANATION:
 # ==================
@@ -23,7 +23,7 @@
 # Set variables
 APP_NAME="OpenStrandStudio3D"
 VERSION="1.01"
-APP_DATE="09_February_2026"
+APP_DATE="13_February_2026"
 PUBLISHER="Yonatan Setbon"
 IDENTIFIER="com.yonatan.openstrandstudio3d"
 

@@ -2,7 +2,7 @@
 #define MyAppVersion "1.01"
 #define MyAppPublisher "Yonatan Setbon"
 #define MyAppExeName "OpenStrandStudio3D.exe"
-#define MyAppDate "09_Feb_2026"
+#define MyAppDate "13_Feb_2026"
 #define SourcePath "C:\Users\YonatanSetbon\.vscode\OpenStrandStudio3d\src"
 #define ExePath "C:\Users\YonatanSetbon\.vscode\OpenStrandStudio3d\src\dist"
 
