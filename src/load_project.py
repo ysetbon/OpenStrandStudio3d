@@ -46,8 +46,11 @@ class LoadProjectMixin:
             # Load into canvas
             self.canvas.load_project_data(project_data)
 
-            # Clear undo history (fresh start with loaded project)
-            self.undo_redo_manager.clear_history()
+            # Restore undo/redo history if present, otherwise fresh start
+            if 'undo_redo' in project_data:
+                self.undo_redo_manager.load_history_data(project_data['undo_redo'])
+            else:
+                self.undo_redo_manager.clear_history()
 
             # Update layer panel with loaded strands
             for strand in self.canvas.strands:

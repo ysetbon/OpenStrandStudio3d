@@ -1,0 +1,472 @@
+{
+  "version": "1.1",
+  "project_name": "OpenStrandStudio Project",
+  "camera": {
+    "distance": 10.0,
+    "azimuth": 45.0,
+    "elevation": 30.0,
+    "target": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "strands": [
+    {
+      "name": "1_1",
+      "start": [
+        -2.395463454742977,
+        0.0,
+        -0.06474216382680709
+      ],
+      "end": [
+        0.7788947168821103,
+        0.0,
+        1.3235763934072429
+      ],
+      "control_point1": [
+        -1.347925258106698,
+        0.0,
+        0.3934029600604294
+      ],
+      "control_point2": [
+        -0.26864347975416836,
+        0.0,
+        0.8654312695200065
+      ],
+      "color": [
+        0.667,
+        0.333,
+        1.0,
+        1.0
+      ],
+      "width": 0.19000000000000003,
+      "height_ratio": 1.0,
+      "cross_section_shape": "ellipse",
+      "corner_radius": 0.0,
+      "visible": true,
+      "start_twist": 0.0,
+      "end_twist": 0.0,
+      "cp1_twist": 0.0,
+      "cp2_twist": 0.0,
+      "type": "strand"
+    },
+    {
+      "name": "1_2",
+      "start": [
+        0.7788947168821103,
+        0.0,
+        1.3235763934072429
+      ],
+      "end": [
+        1.6128675547568987,
+        0.0,
+        -1.6756250422575745
+      ],
+      "control_point1": [
+        1.826432913518389,
+        0.0,
+        1.7817215172944794
+      ],
+      "control_point2": [
+        1.3376565182582185,
+        0.0,
+        -0.6858885684881848
+      ],
+      "color": [
+        0.667,
+        0.333,
+        1.0,
+        1.0
+      ],
+      "width": 0.19000000000000003,
+      "height_ratio": 1.0,
+      "cross_section_shape": "ellipse",
+      "corner_radius": 0.0,
+      "visible": true,
+      "start_twist": 0.0,
+      "end_twist": 0.0,
+      "cp1_twist": 0.0,
+      "cp2_twist": 0.0,
+      "type": "attached",
+      "parent_name": "1_1",
+      "attachment_side": 1,
+      "start_attached": true,
+      "end_attached": true
+    },
+    {
+      "name": "1_3",
+      "start": [
+        1.6128675547568987,
+        0.0,
+        -1.6756250422575745
+      ],
+      "end": [
+        3.1340112707876915,
+        -8.881784197001252e-16,
+        -0.158490086147288
+      ],
+      "control_point1": [
+        1.8880785912555789,
+        0.0,
+        -2.665361516026964
+      ],
+      "control_point2": [
+        2.63203384449753,
+        -5.950795411990839e-16,
+        -0.6591446216636825
+      ],
+      "color": [
+        0.667,
+        0.333,
+        1.0,
+        1.0
+      ],
+      "width": 0.19000000000000003,
+      "height_ratio": 1.0,
+      "cross_section_shape": "ellipse",
+      "corner_radius": 0.0,
+      "visible": true,
+      "start_twist": 0.0,
+      "end_twist": 0.0,
+      "cp1_twist": 0.0,
+      "cp2_twist": 0.0,
+      "type": "attached",
+      "parent_name": "1_2",
+      "attachment_side": 1,
+      "start_attached": true,
+      "end_attached": true
+    },
+    {
+      "name": "1_4",
+      "start": [
+        3.1340112707876915,
+        -8.881784197001252e-16,
+        -0.158490086147288
+      ],
+      "end": [
+        2.432970222383077,
+        -2.6645352591003757e-15,
+        1.6047249876347474
+      ],
+      "control_point1": [
+        3.635988697077853,
+        -1.1812772982011666e-15,
+        0.3421644493691065
+      ],
+      "control_point2": [
+        2.6643137683565996,
+        -2.078337502098293e-15,
+        1.0228640132866758
+      ],
+      "color": [
+        0.667,
+        0.333,
+        1.0,
+        1.0
+      ],
+      "width": 0.19000000000000003,
+      "height_ratio": 1.0,
+      "cross_section_shape": "ellipse",
+      "corner_radius": 0.0,
+      "visible": true,
+      "start_twist": 0.0,
+      "end_twist": 0.0,
+      "cp1_twist": 0.0,
+      "cp2_twist": 0.0,
+      "type": "attached",
+      "parent_name": "1_3",
+      "attachment_side": 1,
+      "start_attached": true,
+      "end_attached": false
+    }
+  ],
+  "connections": {
+    "1_1": [
+      "null",
+      "1_2(0)"
+    ],
+    "1_2": [
+      "1_1(1)",
+      "1_3(0)"
+    ],
+    "1_3": [
+      "1_2(1)",
+      "1_4(0)"
+    ],
+    "1_4": [
+      "1_3(1)",
+      "null"
+    ]
+  },
+  "undo_redo": {
+    "undo_stack": [
+      {
+        "strands": [],
+        "selected_strand": null
+      },
+      {
+        "strands": [
+          {
+            "name": "1_1",
+            "start": [
+              -2.395463454742977,
+              0.0,
+              -0.06474216382680709
+            ],
+            "end": [
+              0.7788947168821103,
+              0.0,
+              1.3235763934072429
+            ],
+            "control_point1": [
+              -1.347925258106698,
+              0.0,
+              0.3934029600604294
+            ],
+            "control_point2": [
+              -0.26864347975416836,
+              0.0,
+              0.8654312695200065
+            ],
+            "color": [
+              0.667,
+              0.333,
+              1.0,
+              1.0
+            ],
+            "width": 0.19000000000000003,
+            "height_ratio": 1.0,
+            "cross_section_shape": "ellipse",
+            "corner_radius": 0.0,
+            "visible": true,
+            "start_twist": 0.0,
+            "end_twist": 0.0,
+            "cp1_twist": 0.0,
+            "cp2_twist": 0.0,
+            "type": "strand"
+          }
+        ],
+        "selected_strand": "1_1"
+      },
+      {
+        "strands": [
+          {
+            "name": "1_1",
+            "start": [
+              -2.395463454742977,
+              0.0,
+              -0.06474216382680709
+            ],
+            "end": [
+              0.7788947168821103,
+              0.0,
+              1.3235763934072429
+            ],
+            "control_point1": [
+              -1.347925258106698,
+              0.0,
+              0.3934029600604294
+            ],
+            "control_point2": [
+              -0.26864347975416836,
+              0.0,
+              0.8654312695200065
+            ],
+            "color": [
+              0.667,
+              0.333,
+              1.0,
+              1.0
+            ],
+            "width": 0.19000000000000003,
+            "height_ratio": 1.0,
+            "cross_section_shape": "ellipse",
+            "corner_radius": 0.0,
+            "visible": true,
+            "start_twist": 0.0,
+            "end_twist": 0.0,
+            "cp1_twist": 0.0,
+            "cp2_twist": 0.0,
+            "type": "strand"
+          },
+          {
+            "name": "1_2",
+            "start": [
+              0.7788947168821103,
+              0.0,
+              1.3235763934072429
+            ],
+            "end": [
+              1.6128675547568987,
+              0.0,
+              -1.6756250422575745
+            ],
+            "control_point1": [
+              1.826432913518389,
+              0.0,
+              1.7817215172944794
+            ],
+            "control_point2": [
+              1.3376565182582185,
+              0.0,
+              -0.6858885684881848
+            ],
+            "color": [
+              0.667,
+              0.333,
+              1.0,
+              1.0
+            ],
+            "width": 0.19000000000000003,
+            "height_ratio": 1.0,
+            "cross_section_shape": "ellipse",
+            "corner_radius": 0.0,
+            "visible": true,
+            "start_twist": 0.0,
+            "end_twist": 0.0,
+            "cp1_twist": 0.0,
+            "cp2_twist": 0.0,
+            "type": "attached",
+            "parent_name": "1_1",
+            "attachment_side": 1,
+            "start_attached": true,
+            "end_attached": false
+          }
+        ],
+        "selected_strand": "1_2"
+      },
+      {
+        "strands": [
+          {
+            "name": "1_1",
+            "start": [
+              -2.395463454742977,
+              0.0,
+              -0.06474216382680709
+            ],
+            "end": [
+              0.7788947168821103,
+              0.0,
+              1.3235763934072429
+            ],
+            "control_point1": [
+              -1.347925258106698,
+              0.0,
+              0.3934029600604294
+            ],
+            "control_point2": [
+              -0.26864347975416836,
+              0.0,
+              0.8654312695200065
+            ],
+            "color": [
+              0.667,
+              0.333,
+              1.0,
+              1.0
+            ],
+            "width": 0.19000000000000003,
+            "height_ratio": 1.0,
+            "cross_section_shape": "ellipse",
+            "corner_radius": 0.0,
+            "visible": true,
+            "start_twist": 0.0,
+            "end_twist": 0.0,
+            "cp1_twist": 0.0,
+            "cp2_twist": 0.0,
+            "type": "strand"
+          },
+          {
+            "name": "1_2",
+            "start": [
+              0.7788947168821103,
+              0.0,
+              1.3235763934072429
+            ],
+            "end": [
+              1.6128675547568987,
+              0.0,
+              -1.6756250422575745
+            ],
+            "control_point1": [
+              1.826432913518389,
+              0.0,
+              1.7817215172944794
+            ],
+            "control_point2": [
+              1.3376565182582185,
+              0.0,
+              -0.6858885684881848
+            ],
+            "color": [
+              0.667,
+              0.333,
+              1.0,
+              1.0
+            ],
+            "width": 0.19000000000000003,
+            "height_ratio": 1.0,
+            "cross_section_shape": "ellipse",
+            "corner_radius": 0.0,
+            "visible": true,
+            "start_twist": 0.0,
+            "end_twist": 0.0,
+            "cp1_twist": 0.0,
+            "cp2_twist": 0.0,
+            "type": "attached",
+            "parent_name": "1_1",
+            "attachment_side": 1,
+            "start_attached": true,
+            "end_attached": true
+          },
+          {
+            "name": "1_3",
+            "start": [
+              1.6128675547568987,
+              0.0,
+              -1.6756250422575745
+            ],
+            "end": [
+              3.1340112707876915,
+              -8.881784197001252e-16,
+              -0.158490086147288
+            ],
+            "control_point1": [
+              1.8880785912555789,
+              0.0,
+              -2.665361516026964
+            ],
+            "control_point2": [
+              2.63203384449753,
+              -5.950795411990839e-16,
+              -0.6591446216636825
+            ],
+            "color": [
+              0.667,
+              0.333,
+              1.0,
+              1.0
+            ],
+            "width": 0.19000000000000003,
+            "height_ratio": 1.0,
+            "cross_section_shape": "ellipse",
+            "corner_radius": 0.0,
+            "visible": true,
+            "start_twist": 0.0,
+            "end_twist": 0.0,
+            "cp1_twist": 0.0,
+            "cp2_twist": 0.0,
+            "type": "attached",
+            "parent_name": "1_2",
+            "attachment_side": 1,
+            "start_attached": true,
+            "end_attached": false
+          }
+        ],
+        "selected_strand": "1_3"
+      }
+    ],
+    "redo_stack": []
+  }
+}

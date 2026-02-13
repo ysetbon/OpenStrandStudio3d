@@ -9,7 +9,7 @@ import numpy as np
 class CanvasSaveLoadMixin:
     """Mixin providing save/load/clear methods for StrandDrawingCanvas."""
 
-    def get_project_data(self):
+    def get_project_data(self, undo_redo_manager=None):
         """
         Get all project data as a dictionary for saving.
 
@@ -52,8 +52,8 @@ class CanvasSaveLoadMixin:
         if self.layer_state_manager:
             connections_data = self.layer_state_manager.getConnections()
 
-        return {
-            'version': '1.0',
+        result = {
+            'version': '1.1',
             'project_name': 'OpenStrandStudio Project',
             'camera': {
                 'distance': self.camera_distance,
@@ -64,6 +64,11 @@ class CanvasSaveLoadMixin:
             'strands': strands_data,
             'connections': connections_data
         }
+
+        if undo_redo_manager is not None:
+            result['undo_redo'] = undo_redo_manager.get_history_data()
+
+        return result
 
     def _sort_attached_strands(self, attached_strands):
         """

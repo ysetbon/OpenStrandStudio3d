@@ -24,8 +24,10 @@ class SaveProjectMixin:
             return  # User cancelled
 
         try:
-            # Get project data from canvas
-            project_data = self.canvas.get_project_data()
+            # Get project data from canvas (include undo/redo history)
+            project_data = self.canvas.get_project_data(
+                undo_redo_manager=self.undo_redo_manager
+            )
 
             # Write to file with nice formatting
             with open(file_path, 'w', encoding='utf-8') as f:

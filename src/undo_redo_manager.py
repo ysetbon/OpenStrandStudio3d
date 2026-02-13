@@ -159,6 +159,20 @@ class UndoRedoManager(QObject):
         self._last_state = None
         self.state_changed.emit()
 
+    def get_history_data(self):
+        """Return undo/redo stacks as a JSON-serializable dict."""
+        return {
+            'undo_stack': list(self.undo_stack),
+            'redo_stack': list(self.redo_stack),
+        }
+
+    def load_history_data(self, data):
+        """Restore undo/redo stacks from a dict (e.g. loaded from file)."""
+        self.undo_stack = list(data.get('undo_stack', []))
+        self.redo_stack = list(data.get('redo_stack', []))
+        self._last_state = self.undo_stack[-1] if self.undo_stack else None
+        self.state_changed.emit()
+
     def _capture_state(self):
         """
         Capture the current canvas state.
