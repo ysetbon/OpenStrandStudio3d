@@ -1160,21 +1160,20 @@ class MoveModeMixin:
 
         if self.moving_control_point == 'start':
             if edit_all:
-                # Edit All mode: move this point and connected strand's endpoint ONLY
+                # Edit All mode: move this point and connected strand's endpoint
                 strand.start = strand.start + delta
                 strand._mark_geometry_dirty()
-                # Also move connected strand's end point (if this is an AttachedStrand)
-                if hasattr(strand, 'parent_strand') and hasattr(strand, 'attachment_side'):
-                    parent = strand.parent_strand
-                    if strand.attachment_side == 0:
-                        # Connected to parent's start
-                        parent.start = parent.start + delta
+                # Move connected strand's endpoint via layer state manager connection
+                conn = getattr(strand, 'start_connection', None)
+                if conn:
+                    target = conn['strand']
+                    if conn['end'] == 'start':
+                        target.start = target.start + delta
                     else:
-                        # Connected to parent's end
-                        parent.end = parent.end + delta
-                    parent._mark_geometry_dirty()
+                        target.end = target.end + delta
+                    target._mark_geometry_dirty()
                     if hasattr(self, "_add_drag_lod_target"):
-                        self._add_drag_lod_target(parent)
+                        self._add_drag_lod_target(target)
             else:
                 # Normal mode: save/restore and propagate
                 original_end = strand.end.copy()
@@ -1186,17 +1185,20 @@ class MoveModeMixin:
                 strand.make_straight()
         elif self.moving_control_point == 'end':
             if edit_all:
-                # Edit All mode: move this point and connected strands' start points ONLY
+                # Edit All mode: move this point and connected strand's endpoint
                 strand.end = strand.end + delta
                 strand._mark_geometry_dirty()
-                # Also move connected attached strands' start points (not whole strand)
-                for attached in strand.attached_strands:
-                    if hasattr(attached, 'attachment_side') and attached.attachment_side == 1:
-                        # This attached strand's start is connected to our end
-                        attached.start = attached.start + delta
-                        attached._mark_geometry_dirty()
-                        if hasattr(self, "_add_drag_lod_target"):
-                            self._add_drag_lod_target(attached)
+                # Move connected strand's endpoint via layer state manager connection
+                conn = getattr(strand, 'end_connection', None)
+                if conn:
+                    target = conn['strand']
+                    if conn['end'] == 'start':
+                        target.start = target.start + delta
+                    else:
+                        target.end = target.end + delta
+                    target._mark_geometry_dirty()
+                    if hasattr(self, "_add_drag_lod_target"):
+                        self._add_drag_lod_target(target)
             else:
                 # Normal mode: save/restore and propagate
                 original_start = strand.start.copy()
